@@ -12,13 +12,17 @@ public class TelegramBotService
     private readonly TelegramBotClient _botClient;
     private readonly GmailClient _gmailService;
     private readonly DatabaseService _databaseService;
+    private readonly OAuthService _oauthService;
+    private readonly AppSettings _settings;
     private long _chatId;
 
-    public TelegramBotService(string botToken, GmailClient gmailService, DatabaseService databaseService)
+    public TelegramBotService(string botToken, GmailClient gmailService, DatabaseService databaseService, OAuthService oauthService, AppSettings settings)
     {
         _botClient = new TelegramBotClient(botToken);
         _gmailService = gmailService;
         _databaseService = databaseService;
+        _oauthService = oauthService;
+        _settings = settings;
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -32,26 +36,257 @@ public class TelegramBotService
     {
         try
         {
-            if (update.Type == UpdateType.Message && update.Message?.Text != null) await HandleMessageAsync(update.Message, cancellationToken);
-            else if (update.Type == UpdateType.CallbackQuery && update.CallbackQuery != null) await HandleCallbackQueryAsync(update.CallbackQuery, cancellationToken);
+            if (update.Type == UpdateType.Message && update.Message?.Text != null) 
+                await HandleMessageAsync(update.Message, cancellationToken);
+            else if (update.Type == UpdateType.CallbackQuery && update.CallbackQuery != null) 
+                await HandleCallbackQueryAsync(update.CallbackQuery, cancellationToken);
         }
-        catch (Exception ex) { Console.WriteLine($"Error handling update: {ex.Message}"); }
+        catch (Exception ex) 
+        { 
+            Console.WriteLine($"Error handling update: {ex.Message}"); 
+        }
     }
 
     private async Task HandleMessageAsync(Message message, CancellationToken cancellationToken)
     {
         _chatId = message.Chat.Id;
-        if (message.Text == "/start")
+        var command = message.Text?.ToLower().Trim();
+        
+        switch (command)
         {
-            await _botClient.SendTextMessageAsync(_chatId, "Welcome to Gmail Telegram Bot! Your emails will be forwarded here automatically.", cancellationToken: cancellationToken);
+            case "/start":
+                await HandleStartCommand(cancellationToken);
+                break;
+            case "/status":
+                await HandleStatusCommand(cancellationToken);
+                break;
+            case "/disconnect":
+                await HandleDisconnectCommand(cancellationToken);
+                break;
+            case "/help":
+                await HandleHelpCommand(cancellationToken);
+                break;
+            default:
+                await _botClient.SendTextMessageAsync(_chatId, 
+                    "❓ Unknown command. Type /help to see available commands.", 
+                    cancellationToken: cancellationToken);
+                break;
         }
+    }
+
+    private async Task HandleStartCommand(CancellationToken cancellationToken)
+    {
+        // Check if user already has credentials
+        if (_databaseService.HasUserCredentials(_chatId))
+        {
+            var credentials = _databaseService.GetUserCredentials(_chatId);
+            await _botClient.SendTextMessageAsync(_chatId, 
+                $"✅ You're already connected!\n\n" +
+                $"📧 Gmail account: {credentials?.EmailAddress ?? "Unknown"}\n" +
+                $"🕒 Connected since: {credentials?.CreatedAt:yyyy-MM-dd HH:mm} UTC\n\n" +
+                $"Your emails will be forwarded here automatically. Use /status to check connection details.", 
+                cancellationToken: cancellationToken);
+            return;
+        }
+
+        // Generate OAuth URL and send authentication link
+        if (string.IsNullOrEmpty(_settings.GoogleClientId))
+        {
+            await _botClient.SendTextMessageAsync(_chatId,
+                "❌ Bot configuration error: Google OAuth credentials not configured. Please contact the bot administrator.",
+                cancellationToken: cancellationToken);
+            return;
+        }
+
+        var authUrl = _oauthService.GenerateAuthorizationUrl(_chatId, _settings.GoogleClientId);
+        var keyboard = new InlineKeyboardMarkup(new[]
+        {
+            InlineKeyboardButton.WithUrl("🔐 Connect Gmail Account", authUrl)
+        });
+
+        await _botClient.SendTextMessageAsync(_chatId,
+            "👋 Welcome to Gmail Telegram Bot!\n\n" +
+            "To get started, you need to connect your Gmail account. Click the button below to authorize access:\n\n" +
+            "🔒 Your credentials are stored securely and only you can access them.\n" +
+            "📧 Once connected, new emails will be forwarded here automatically.\n" +
+            "⚡ You can disconnect anytime using /disconnect",
+            replyMarkup: keyboard,
+            cancellationToken: cancellationToken);
+    }
+
+    private async Task HandleStatusCommand(CancellationToken cancellationToken)
+    {
+        if (!_databaseService.HasUserCredentials(_chatId))
+        {
+            await _botClient.SendTextMessageAsync(_chatId,
+                "❌ No Gmail account connected.\n\n" +
+                "Use /start to connect your Gmail account.",
+                cancellationToken: cancellationToken);
+            return;
+        }
+
+        var credentials = _databaseService.GetUserCredentials(_chatId);
+        if (credentials == null)
+        {
+            await _botClient.SendTextMessageAsync(_chatId,
+                "❌ Error retrieving your credentials. Please try /disconnect and then /start again.",
+                cancellationToken: cancellationToken);
+            return;
+        }
+
+        var isExpired = credentials.ExpiresAt <= DateTime.UtcNow;
+        var status = isExpired ? "🟡 Token expired (will auto-refresh)" : "🟢 Active";
+        
+        await _botClient.SendTextMessageAsync(_chatId,
+            $"📊 **Gmail Connection Status**\n\n" +
+            $"📧 Email: {credentials.EmailAddress}\n" +
+            $"🔗 Status: {status}\n" +
+            $"🕒 Connected: {credentials.CreatedAt:yyyy-MM-dd HH:mm} UTC\n" +
+            $"🔄 Last updated: {credentials.UpdatedAt:yyyy-MM-dd HH:mm} UTC\n" +
+            $"⏰ Token expires: {credentials.ExpiresAt:yyyy-MM-dd HH:mm} UTC\n\n" +
+            $"💡 Use /disconnect to revoke access\n" +
+            $"💡 Use /help for more commands",
+            parseMode: ParseMode.Markdown,
+            cancellationToken: cancellationToken);
+    }
+
+    private async Task HandleDisconnectCommand(CancellationToken cancellationToken)
+    {
+        if (!_databaseService.HasUserCredentials(_chatId))
+        {
+            await _botClient.SendTextMessageAsync(_chatId,
+                "❌ No Gmail account is currently connected.\n\n" +
+                "Use /start to connect your Gmail account.",
+                cancellationToken: cancellationToken);
+            return;
+        }
+
+        var credentials = _databaseService.GetUserCredentials(_chatId);
+        var keyboard = new InlineKeyboardMarkup(new[]
+        {
+            new[]
+            {
+                InlineKeyboardButton.WithCallbackData("✅ Yes, Disconnect", "disconnect_confirm"),
+                InlineKeyboardButton.WithCallbackData("❌ Cancel", "disconnect_cancel")
+            }
+        });
+
+        await _botClient.SendTextMessageAsync(_chatId,
+            $"⚠️ **Confirm Disconnection**\n\n" +
+            $"Are you sure you want to disconnect your Gmail account?\n\n" +
+            $"📧 Account: {credentials?.EmailAddress ?? "Unknown"}\n\n" +
+            $"This will:\n" +
+            $"• Stop forwarding new emails\n" +
+            $"• Delete your stored credentials\n" +
+            $"• Require re-authentication to reconnect\n\n" +
+            $"You can always reconnect later using /start",
+            parseMode: ParseMode.Markdown,
+            replyMarkup: keyboard,
+            cancellationToken: cancellationToken);
+    }
+
+    private async Task HandleHelpCommand(CancellationToken cancellationToken)
+    {
+        var helpText = """
+            📚 **Gmail Telegram Bot - Help**
+
+            **Available Commands:**
+            /start - Connect your Gmail account via OAuth
+            /status - Check your Gmail connection status  
+            /disconnect - Revoke access and delete credentials
+            /help - Show this help message
+
+            **How it works:**
+            1️⃣ Use /start to connect your Gmail account
+            2️⃣ Authorize the bot in your browser
+            3️⃣ New emails will be forwarded here automatically
+            4️⃣ Use action buttons on each email to manage them
+
+            **Email Actions:**
+            🗑️ Delete - Move email to trash
+            📦 Archive - Remove from inbox (keep in All Mail)  
+            ⭐ Star - Add star to email
+            ➡️ Forward - Forward email to another address
+
+            **Security:**
+            🔒 Your credentials are stored securely
+            🔑 OAuth tokens are encrypted in local database
+            🚫 No passwords are stored
+            ⏰ Tokens auto-refresh as needed
+            🛡️ You can revoke access anytime
+
+            **Need help?** Check the documentation or report issues on GitHub.
+            """;
+
+        await _botClient.SendTextMessageAsync(_chatId,
+            helpText,
+            parseMode: ParseMode.Markdown,
+            cancellationToken: cancellationToken);
+    }
+
+    public async Task HandleOAuthSuccess(long chatId, string emailAddress, CancellationToken cancellationToken)
+    {
+        await _botClient.SendTextMessageAsync(chatId,
+            $"✅ **Gmail Connected Successfully!**\n\n" +
+            $"📧 Account: {emailAddress}\n" +
+            $"🕒 Connected: {DateTime.UtcNow:yyyy-MM-dd HH:mm} UTC\n\n" +
+            $"🎉 You're all set! New emails will now be forwarded to this chat automatically.\n\n" +
+            $"💡 Use /status to check connection details\n" +
+            $"💡 Use /help for available commands",
+            parseMode: ParseMode.Markdown,
+            cancellationToken: cancellationToken);
     }
 
     private async Task HandleCallbackQueryAsync(CallbackQuery callbackQuery, CancellationToken cancellationToken)
     {
         if (callbackQuery.Data == null || callbackQuery.Message == null) return;
-        var parts = callbackQuery.Data.Split('|'); if (parts.Length < 2) return;
-        var action = parts[0]; var messageId = parts[1]; var userId = callbackQuery.From.Id.ToString(); bool success = false;
+
+        // Handle disconnect confirmation
+        if (callbackQuery.Data == "disconnect_confirm")
+        {
+            var credentials = _databaseService.GetUserCredentials(callbackQuery.From.Id);
+            _databaseService.DeleteUserCredentials(callbackQuery.From.Id);
+            
+            await _botClient.EditMessageTextAsync(
+                callbackQuery.Message.Chat.Id,
+                callbackQuery.Message.MessageId,
+                $"✅ **Gmail Account Disconnected**\n\n" +
+                $"📧 Account: {credentials?.EmailAddress ?? "Unknown"}\n" +
+                $"🕒 Disconnected: {DateTime.UtcNow:yyyy-MM-dd HH:mm} UTC\n\n" +
+                $"✅ Your credentials have been deleted\n" +
+                $"✅ Email forwarding has been stopped\n\n" +
+                $"💡 Use /start to reconnect anytime",
+                parseMode: ParseMode.Markdown,
+                cancellationToken: cancellationToken);
+                
+            await _botClient.AnswerCallbackQueryAsync(callbackQuery.Id, "Disconnected successfully", cancellationToken: cancellationToken);
+            return;
+        }
+
+        if (callbackQuery.Data == "disconnect_cancel")
+        {
+            await _botClient.EditMessageTextAsync(
+                callbackQuery.Message.Chat.Id,
+                callbackQuery.Message.MessageId,
+                "❌ **Disconnection Cancelled**\n\n" +
+                "Your Gmail account remains connected.\n\n" +
+                "💡 Use /status to check connection details",
+                parseMode: ParseMode.Markdown,
+                cancellationToken: cancellationToken);
+                
+            await _botClient.AnswerCallbackQueryAsync(callbackQuery.Id, "Cancelled", cancellationToken: cancellationToken);
+            return;
+        }
+
+        // Handle email actions
+        var parts = callbackQuery.Data.Split('|'); 
+        if (parts.Length < 2) return;
+        
+        var action = parts[0]; 
+        var messageId = parts[1]; 
+        var userId = callbackQuery.From.Id.ToString(); 
+        bool success = false;
+        
         try
         {
             switch (action)
@@ -97,7 +332,8 @@ public class TelegramBotService
                     }
                     break;
             }
-            if (!success && action != "forward") await _botClient.AnswerCallbackQueryAsync(callbackQuery.Id, "Action failed. Please try again.", cancellationToken: cancellationToken);
+            if (!success && action != "forward") 
+                await _botClient.AnswerCallbackQueryAsync(callbackQuery.Id, "Action failed. Please try again.", cancellationToken: cancellationToken);
         }
         catch (Exception ex)
         {
