@@ -1,0 +1,11 @@
+bin/
+obj/
+*.user
+*.swp
+*.tmp
+*.log
+token.json
+settings.json
+*.db
+/.vs/
+Backup*/

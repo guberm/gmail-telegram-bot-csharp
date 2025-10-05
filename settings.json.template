@@ -1,0 +1,13 @@
+{
+  "gmail_client_id": "YOUR_GMAIL_CLIENT_ID",
+  "gmail_client_secret": "YOUR_GMAIL_CLIENT_SECRET",
+  "telegram_bot_token": "YOUR_TELEGRAM_BOT_TOKEN",
+  "polling_interval_seconds": 60,
+  "database_path": "telegram_gmail.db",
+  "gmail_scopes": [
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.modify"
+  ],
+  "redirect_uri": "http://localhost:8080/",
+  "application_name": "Telegram Gmail Bot"
+}
