@@ -13,9 +13,18 @@ class Program
         {
             Console.WriteLine("Loading configuration...");
             var settings = AppSettings.LoadFromFile("settings.json");
+            
+            // Validate required settings
             if (string.IsNullOrEmpty(settings.TelegramBotToken))
             {
                 Console.WriteLine("ERROR: Please configure settings.json with telegram_bot_token");
+                return;
+            }
+            
+            if (string.IsNullOrEmpty(settings.GoogleClientId) || string.IsNullOrEmpty(settings.GoogleClientSecret))
+            {
+                Console.WriteLine("ERROR: Please configure settings.json with google_client_id and google_client_secret");
+                Console.WriteLine("See OAUTH_SETUP.md for detailed instructions.");
                 return;
             }
             
@@ -29,21 +38,43 @@ class Program
             Console.WriteLine("Database initialized\n");
             
             Console.WriteLine("Starting OAuth callback server...");
-            var oauthCallbackServer = new OAuthCallbackServer(databaseService, settings.OAuthCallbackPort);
             var oauthService = new OAuthService(databaseService, settings);
+            var oauthCallbackServer = new OAuthCallbackServer(databaseService, settings.OAuthCallbackPort);
             oauthCallbackServer.Start();
+            Console.WriteLine($"OAuth callback server started on port {settings.OAuthCallbackPort}");
             Console.WriteLine($"OAuth server running on port {settings.OAuthCallbackPort}\n");
             
             Console.WriteLine("Starting Telegram bot...");
             var gmailClient = new GmailClient(settings);
-            var telegramService = new TelegramBotService(settings.TelegramBotToken, gmailClient, databaseService);
+            var telegramService = new TelegramBotService(settings.TelegramBotToken, gmailClient, databaseService, oauthService, settings);
             var cancellationTokenSource = new CancellationTokenSource();
             
             // Setup OAuth callback handling
             oauthCallbackServer.CallbackReceived += async (sender, e) =>
             {
                 Console.WriteLine($"OAuth callback received for chat {e.ChatId}");
-                // Note: Token exchange will be handled by TelegramBotService when it detects the callback
+                try
+                {
+                    var credentials = await oauthService.ExchangeCodeForTokensAsync(
+                        e.AuthorizationCode, 
+                        settings.GoogleClientId, 
+                        settings.GoogleClientSecret, 
+                        e.ChatId);
+                        
+                    if (credentials != null)
+                    {
+                        Console.WriteLine($"OAuth successful for {credentials.EmailAddress} (chat {e.ChatId})");
+                        await telegramService.HandleOAuthSuccess(e.ChatId, credentials.EmailAddress, cancellationTokenSource.Token);
+                    }
+                    else
+                    {
+                        Console.WriteLine($"OAuth failed for chat {e.ChatId}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error handling OAuth callback for chat {e.ChatId}: {ex.Message}");
+                }
             };
             
             await telegramService.StartAsync(cancellationTokenSource.Token);
