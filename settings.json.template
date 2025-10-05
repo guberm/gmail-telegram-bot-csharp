@@ -1,5 +1,5 @@
 {
-  "telegram_bot_token": "YOUR_BOT_TOKEN",
+  "telegram_bot_token": "YOUR_TELEGRAM_BOT_TOKEN",
   "google_client_id": "YOUR_GOOGLE_CLIENT_ID",
   "google_client_secret": "YOUR_GOOGLE_CLIENT_SECRET",
   "polling_interval_seconds": 60,

@@ -5,6 +5,8 @@ namespace TelegramGmailBot.Models;
 public class AppSettings
 {
     [JsonProperty("telegram_bot_token")] public string TelegramBotToken { get; set; } = string.Empty;
+    [JsonProperty("google_client_id")] public string GoogleClientId { get; set; } = string.Empty;
+    [JsonProperty("google_client_secret")] public string GoogleClientSecret { get; set; } = string.Empty;
     [JsonProperty("polling_interval_seconds")] public int PollingIntervalSeconds { get; set; } = 60;
     [JsonProperty("database_path")] public string DatabasePath { get; set; } = "telegram_gmail.db";
     [JsonProperty("gmail_scopes")] public List<string> GmailScopes { get; set; } = new();

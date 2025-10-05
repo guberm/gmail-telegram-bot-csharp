@@ -6,20 +6,20 @@
 
 A .NET 8 console application that integrates Gmail with Telegram using **OAuth 2.0 authentication**. Each user authenticates their own Gmail account through the bot, which then forwards new inbox messages to their Telegram chat with interactive action buttons.
 
-## ? Key Features
+## 🌟 Key Features
 
-- ?? **OAuth 2.0 Authentication** - Per-user Gmail authentication via web flow
-- ?? **Email Forwarding** - Automatically forwards new inbox messages to Telegram
-- ?? **Interactive Buttons** - Delete, Archive, Star, and Forward actions
-- ??? **Label Management** - View and modify Gmail labels
-- ?? **SQLite Persistence** - Stores messages, actions, and user credentials
-- ?? **Automatic Token Refresh** - Handles expired access tokens seamlessly
-- ?? **Direct Links** - Quick access to open emails in Gmail
-- ?? **Action History** - Tracks all user actions on messages
-- ??? **CSRF Protection** - Secure OAuth state validation
-- ?? **Resilient Polling** - Retries with exponential backoff
+- 🔐 **OAuth 2.0 Authentication** - Per-user Gmail authentication via web flow
+- 📨 **Email Forwarding** - Automatically forwards new inbox messages to Telegram
+- 🎛️ **Interactive Buttons** - Delete, Archive, Star, and Forward actions
+- 🏷️ **Label Management** - View and modify Gmail labels
+- 💾 **SQLite Persistence** - Stores messages, actions, and user credentials
+- 🔄 **Automatic Token Refresh** - Handles expired access tokens seamlessly
+- 🔗 **Direct Links** - Quick access to open emails in Gmail
+- 📊 **Action History** - Tracks all user actions on messages
+- 🛡️ **CSRF Protection** - Secure OAuth state validation
+- ⚡ **Resilient Polling** - Retries with exponential backoff
 
-## ?? Quick Start
+## 🚀 Quick Start
 
 ### Prerequisites
 
@@ -49,6 +49,7 @@ copy settings.json.template settings.json  # Windows
    - Enable Gmail API
    - Create OAuth 2.0 Client ID (Web application)
    - Add redirect URI: `http://localhost:8080/oauth/callback`
+   - Copy the Client ID and Client Secret
 
 2. **Get Telegram Bot Token**
    - Message [@BotFather](https://t.me/botfather) on Telegram
@@ -60,6 +61,8 @@ copy settings.json.template settings.json  # Windows
 ```json
 {
   "telegram_bot_token": "YOUR_BOT_TOKEN_FROM_BOTFATHER",
+  "google_client_id": "YOUR_GOOGLE_CLIENT_ID",
+  "google_client_secret": "YOUR_GOOGLE_CLIENT_SECRET",
   "polling_interval_seconds": 60,
   "database_path": "telegram_gmail.db",
   "gmail_scopes": [
@@ -72,7 +75,10 @@ copy settings.json.template settings.json  # Windows
 }
 ```
 
-**Note:** Gmail credentials are NO longer stored in settings! Each user authenticates individually.
+**Important:** 
+- ⚠️ Never commit `settings.json` to version control
+- 🔐 Each user authenticates individually - no shared credentials
+- 📚 See [OAUTH_SETUP.md](OAUTH_SETUP.md) for detailed setup instructions
 
 ### Running the Bot
 
@@ -81,16 +87,18 @@ dotnet run
 ```
 
 The bot will:
-1. Start an OAuth callback server on port 8080
-2. Start the Telegram bot
-3. Wait for users to authenticate via `/start` command
+1. ✅ Validate configuration (Telegram token + Google OAuth credentials)
+2. 🗄️ Initialize SQLite database
+3. 🌐 Start OAuth callback server on port 8080
+4. 🤖 Start Telegram bot
+5. ⏳ Wait for users to authenticate via `/start` command
 
-## ?? User Guide
+## 🎯 User Guide
 
 ### Authentication Flow
 
 1. **Start the bot** - Send `/start` to your bot on Telegram
-2. **Click the OAuth link** - Bot responds with "?? Connect Gmail Account" button
+2. **Click the OAuth link** - Bot responds with "🔐 Connect Gmail Account" button
 3. **Authorize on Google** - Grant Gmail permissions in your browser
 4. **Success!** - You'll be redirected and the bot confirms connection
 5. **Receive emails** - New Gmail messages appear in your Telegram chat
@@ -99,36 +107,36 @@ The bot will:
 
 | Command | Description |
 |---------|-------------|
-| `/start` | Initialize bot and get OAuth authentication link |
-| `/status` | Check your Gmail connection status |
-| `/disconnect` | Revoke access and delete stored tokens |
-| `/help` | Show available commands and usage guide |
+| `/start` | Connect your Gmail account via OAuth authentication |
+| `/status` | Check your Gmail connection status and details |
+| `/disconnect` | Revoke access and delete stored credentials |
+| `/help` | Show available commands and detailed usage guide |
 
 ### Email Actions
 
 Each forwarded email includes inline buttons:
 
-- ??? **Delete** - Move email to trash
-- ?? **Archive** - Remove from inbox (keep in All Mail)
-- ? **Star** - Add star to email
-- ?? **Forward** - Forward email to another address
+- 🗑️ **Delete** - Move email to trash
+- 📦 **Archive** - Remove from inbox (keep in All Mail)
+- ⭐ **Star** - Add star to email
+- ➡️ **Forward** - Forward email to another address (coming soon)
 
-## ??? Architecture
+## 🏗️ Architecture
 
 ```
-???????????????     OAuth Link      ????????????????
-?   Telegram  ??????????????????????? Google OAuth ?
-?     Bot     ?                      ?    Server    ?
-???????????????                      ????????????????
-       ?                                     ?
-       ? Token Callback                      ? Auth Code
-       ???????????????????????????????????????
-       ?
-       ??? Store Credentials (SQLite)
-       ?
-       ??? Fetch Emails (Gmail API)
-       ?
-       ??? Forward to User (Telegram)
+┌─────────┐     OAuth Link      ┌──────────┐
+│ Telegram  │◄──────────────────►│ Google OAuth │
+│   Bot     │                    │   Server    │
+└─────────┘                      └──────────┘
+       │                                   │
+       │ Token Callback                    │ Auth Code
+       │◄──────────────────────────────────┘
+       │
+       │ Store Credentials (SQLite)
+       │
+       │ Fetch Emails (Gmail API)
+       │
+       │ Forward to User (Telegram)
 ```
 
 ### Database Schema
@@ -157,22 +165,22 @@ User action history
 id, message_id, action_type, action_timestamp, user_id, new_label_values
 ```
 
-## ?? Security Features
+## 🔒 Security Features
 
-- ? **Per-user OAuth** - No shared credentials
-- ? **CSRF Protection** - Random state validation
-- ? **Token Encryption** - Secure storage in SQLite
-- ? **Automatic Refresh** - Expired tokens handled transparently
-- ? **User Revocation** - Users can disconnect anytime
-- ? **State Expiration** - OAuth states expire after 10 minutes
+- 👤 **Per-user OAuth** - No shared credentials
+- 🛡️ **CSRF Protection** - Random state validation
+- 🔐 **Token Encryption** - Secure storage in SQLite
+- 🔄 **Automatic Refresh** - Expired tokens handled transparently
+- 🚫 **User Revocation** - Users can disconnect anytime
+- ⏰ **State Expiration** - OAuth states expire after 10 minutes
 
-## ?? Documentation
+## 📚 Documentation
 
 - **[OAuth Setup Guide](OAUTH_SETUP.md)** - Detailed OAuth configuration and troubleshooting
 - **[Contributing Guidelines](CONTRIBUTING.md)** - How to contribute to the project
 - **[License](LICENSE)** - MIT License terms
 
-## ??? Development
+## 🛠️ Development
 
 ### Building
 
@@ -190,21 +198,21 @@ dotnet test
 
 ```
 gmail-telegram-bot-csharp/
-??? Models/              # Data models
-?   ??? AppSettings.cs
-?   ??? UserCredentials.cs
-?   ??? OAuthState.cs
-??? Services/            # Business logic
-?   ??? OAuthService.cs
-?   ??? OAuthCallbackServer.cs
-?   ??? GmailClient.cs
-?   ??? TelegramBotService.cs
-??? DatabaseService.cs   # SQLite persistence
-??? Program.cs           # Entry point
-??? tests/               # Unit tests
+├── Models/              # Data models
+│   ├── AppSettings.cs
+│   ├── UserCredentials.cs
+│   └── OAuthState.cs
+├── Services/            # Business logic
+│   ├── OAuthService.cs
+│   ├── OAuthCallbackServer.cs
+│   ├── GmailClient.cs
+│   └── TelegramBotService.cs
+├── DatabaseService.cs   # SQLite persistence
+├── Program.cs           # Entry point
+└── tests/               # Unit tests
 ```
 
-## ?? Roadmap
+## 🗺️ Roadmap
 
 - [ ] **Complete Forward implementation** - Send emails to other addresses
 - [ ] **Multi-account support** - Multiple Gmail accounts per user
@@ -216,7 +224,7 @@ gmail-telegram-bot-csharp/
 - [ ] **Notification customization** - Per-user notification preferences
 - [ ] **Web dashboard** - Optional web interface for management
 
-## ?? Contributing
+## 🤝 Contributing
 
 Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for:
 
@@ -225,22 +233,22 @@ Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for:
 - Development setup
 - Testing requirements
 
-## ?? License
+## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## ?? Acknowledgments
+## 🙏 Acknowledgments
 
 - Built with [.NET 8](https://dotnet.microsoft.com/)
 - Uses [Google Gmail API](https://developers.google.com/gmail/api)
 - Powered by [Telegram.Bot](https://github.com/TelegramBots/Telegram.Bot)
 - Data persistence with [SQLite](https://www.sqlite.org/)
 
-## ?? Support
+## 💬 Support
 
 - **Issues**: [GitHub Issues](https://github.com/guberm/gmail-telegram-bot-csharp/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/guberm/gmail-telegram-bot-csharp/discussions)
 
 ---
 
-?? **Security Note**: Never commit `settings.json`, `telegram_gmail.db`, or any files containing credentials to version control!
+⚠️ **Security Note**: Never commit `settings.json`, `telegram_gmail.db`, or any files containing credentials to version control!
