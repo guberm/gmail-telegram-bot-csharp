@@ -4,7 +4,7 @@ using TelegramGmailBot.Models;
 
 namespace TelegramGmailBot.Services;
 
-public class DatabaseService : IDisposable
+public partial class DatabaseService : IDisposable
 {
     private readonly SqliteConnection _connection;
     public DatabaseService(string databasePath)
@@ -20,7 +20,11 @@ public class DatabaseService : IDisposable
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = createMessagesTable; cmd.ExecuteNonQuery();
         cmd.CommandText = createActionsTable; cmd.ExecuteNonQuery();
+        
+        // Initialize OAuth tables
+        InitializeOAuthTables();
     }
+    
     public void InsertOrUpdateMessage(EmailMessage message)
     {
         var sql = @"INSERT OR REPLACE INTO messages (message_id, subject, sender, received_datetime, content, attachments, labels, direct_link, is_read, telegram_message_id) VALUES (@message_id,@subject,@sender,@received_datetime,@content,@attachments,@labels,@direct_link,@is_read,@telegram_message_id)";
@@ -38,6 +42,7 @@ public class DatabaseService : IDisposable
         cmd.Parameters.AddWithValue("@telegram_message_id", message.TelegramMessageId ?? (object)DBNull.Value);
         cmd.ExecuteNonQuery();
     }
+    
     public EmailMessage? GetMessage(string messageId)
     {
         var sql = "SELECT * FROM messages WHERE message_id = @message_id";
@@ -62,6 +67,7 @@ public class DatabaseService : IDisposable
         }
         return null;
     }
+    
     public bool MessageExists(string messageId)
     {
         var sql = "SELECT COUNT(*) FROM messages WHERE message_id = @message_id";
@@ -69,6 +75,7 @@ public class DatabaseService : IDisposable
         cmd.CommandText = sql; cmd.Parameters.AddWithValue("@message_id", messageId);
         var count = (long)(cmd.ExecuteScalar() ?? 0L); return count > 0;
     }
+    
     public void InsertAction(MessageAction action)
     {
         var sql = @"INSERT INTO actions (message_id, action_type, action_timestamp, user_id, new_label_values) VALUES (@message_id,@action_type,@action_timestamp,@user_id,@new_label_values)";
@@ -81,6 +88,7 @@ public class DatabaseService : IDisposable
         cmd.Parameters.AddWithValue("@new_label_values", action.NewLabelValues != null ? JsonConvert.SerializeObject(action.NewLabelValues) : (object)DBNull.Value);
         cmd.ExecuteNonQuery();
     }
+    
     public List<MessageAction> GetActionsForMessage(string messageId)
     {
         var sql = "SELECT * FROM actions WHERE message_id = @message_id ORDER BY action_timestamp DESC";
@@ -102,5 +110,6 @@ public class DatabaseService : IDisposable
         }
         return actions;
     }
+    
     public void Dispose() => _connection?.Dispose();
 }

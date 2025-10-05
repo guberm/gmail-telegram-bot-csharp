@@ -1,0 +1,179 @@
+using System.Security.Cryptography;
+using Newtonsoft.Json;
+using TelegramGmailBot.Models;
+
+namespace TelegramGmailBot.Services;
+
+public class OAuthService
+{
+    private readonly DatabaseService _databaseService;
+    private readonly AppSettings _settings;
+    private readonly HttpClient _httpClient;
+    private const string GoogleAuthUrl = "https://accounts.google.com/o/oauth2/v2/auth";
+    private const string GoogleTokenUrl = "https://oauth2.googleapis.com/token";
+
+    public OAuthService(DatabaseService databaseService, AppSettings settings)
+    {
+        _databaseService = databaseService;
+        _settings = settings;
+        _httpClient = new HttpClient();
+    }
+
+    public string GenerateAuthorizationUrl(long chatId, string clientId)
+    {
+        var state = GenerateRandomState();
+        var oauthState = new OAuthState
+        {
+            State = state,
+            ChatId = chatId,
+            CreatedAt = DateTime.UtcNow,
+            ExpiresAt = DateTime.UtcNow.AddMinutes(10)
+        };
+        
+        _databaseService.SaveOAuthState(oauthState);
+        _databaseService.CleanupExpiredOAuthStates();
+
+        var scopes = string.Join(" ", _settings.GmailScopes);
+        var url = $"{GoogleAuthUrl}?" +
+                  $"client_id={Uri.EscapeDataString(clientId)}&" +
+                  $"redirect_uri={Uri.EscapeDataString(_settings.OAuthCallbackUrl)}&" +
+                  $"response_type=code&" +
+                  $"scope={Uri.EscapeDataString(scopes)}&" +
+                  $"state={Uri.EscapeDataString(state)}&" +
+                  $"access_type=offline&" +
+                  $"prompt=consent";
+
+        return url;
+    }
+
+    public async Task<UserCredentials?> ExchangeCodeForTokensAsync(string code, string clientId, string clientSecret, long chatId)
+    {
+        try
+        {
+            var requestData = new Dictionary<string, string>
+            {
+                { "code", code },
+                { "client_id", clientId },
+                { "client_secret", clientSecret },
+                { "redirect_uri", _settings.OAuthCallbackUrl },
+                { "grant_type", "authorization_code" }
+            };
+
+            var response = await _httpClient.PostAsync(GoogleTokenUrl, new FormUrlEncodedContent(requestData));
+            var responseContent = await response.Content.ReadAsStringAsync();
+
+            if (!response.IsSuccessStatusCode)
+            {
+                Console.WriteLine($"Token exchange failed: {responseContent}");
+                return null;
+            }
+
+            var tokenResponse = JsonConvert.DeserializeObject<GoogleTokenResponse>(responseContent);
+            if (tokenResponse == null || string.IsNullOrEmpty(tokenResponse.AccessToken))
+                return null;
+
+            var credentials = new UserCredentials
+            {
+                ChatId = chatId,
+                AccessToken = tokenResponse.AccessToken,
+                RefreshToken = tokenResponse.RefreshToken ?? string.Empty,
+                ExpiresAt = DateTime.UtcNow.AddSeconds(tokenResponse.ExpiresIn),
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+
+            credentials.EmailAddress = await GetUserEmailAsync(credentials.AccessToken) ?? string.Empty;
+            _databaseService.SaveUserCredentials(credentials);
+            return credentials;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error exchanging code for tokens: {ex.Message}");
+            return null;
+        }
+    }
+
+    public async Task<bool> RefreshAccessTokenAsync(long chatId, string clientId, string clientSecret)
+    {
+        try
+        {
+            var credentials = _databaseService.GetUserCredentials(chatId);
+            if (credentials == null || string.IsNullOrEmpty(credentials.RefreshToken))
+                return false;
+
+            var requestData = new Dictionary<string, string>
+            {
+                { "client_id", clientId },
+                { "client_secret", clientSecret },
+                { "refresh_token", credentials.RefreshToken },
+                { "grant_type", "refresh_token" }
+            };
+
+            var response = await _httpClient.PostAsync(GoogleTokenUrl, new FormUrlEncodedContent(requestData));
+            var responseContent = await response.Content.ReadAsStringAsync();
+
+            if (!response.IsSuccessStatusCode)
+            {
+                Console.WriteLine($"Token refresh failed: {responseContent}");
+                return false;
+            }
+
+            var tokenResponse = JsonConvert.DeserializeObject<GoogleTokenResponse>(responseContent);
+            if (tokenResponse == null || string.IsNullOrEmpty(tokenResponse.AccessToken))
+                return false;
+
+            credentials.AccessToken = tokenResponse.AccessToken;
+            credentials.ExpiresAt = DateTime.UtcNow.AddSeconds(tokenResponse.ExpiresIn);
+            credentials.UpdatedAt = DateTime.UtcNow;
+
+            _databaseService.SaveUserCredentials(credentials);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error refreshing token: {ex.Message}");
+            return false;
+        }
+    }
+
+    private async Task<string?> GetUserEmailAsync(string accessToken)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, "https://www.googleapis.com/oauth2/v2/userinfo");
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
+            var response = await _httpClient.SendAsync(request);
+            if (response.IsSuccessStatusCode)
+            {
+                var content = await response.Content.ReadAsStringAsync();
+                var userInfo = JsonConvert.DeserializeObject<GoogleUserInfo>(content);
+                return userInfo?.Email;
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    private string GenerateRandomState()
+    {
+        var bytes = new byte[32];
+        using (var rng = RandomNumberGenerator.Create())
+        {
+            rng.GetBytes(bytes);
+        }
+        return Convert.ToBase64String(bytes).Replace("+", "-").Replace("/", "_").Replace("=", "");
+    }
+
+    private class GoogleTokenResponse
+    {
+        [JsonProperty("access_token")] public string AccessToken { get; set; } = string.Empty;
+        [JsonProperty("refresh_token")] public string? RefreshToken { get; set; }
+        [JsonProperty("expires_in")] public int ExpiresIn { get; set; }
+        [JsonProperty("token_type")] public string TokenType { get; set; } = string.Empty;
+    }
+
+    private class GoogleUserInfo
+    {
+        [JsonProperty("email")] public string Email { get; set; } = string.Empty;
+    }
+}

@@ -1,8 +1,8 @@
 using Google.Apis.Auth.OAuth2;
+using Google.Apis.Auth.OAuth2.Flows;
 using Google.Apis.Gmail.v1;
 using Google.Apis.Gmail.v1.Data;
 using Google.Apis.Services;
-using Google.Apis.Util.Store;
 using TelegramGmailBot.Models;
 using System.Text;
 
@@ -12,21 +12,48 @@ public class GmailClient
 {
     private readonly AppSettings _settings;
     private Google.Apis.Gmail.v1.GmailService? _service;
-    private UserCredential? _credential;
+    private long _currentChatId;
 
     public GmailClient(AppSettings settings) { _settings = settings; }
 
-    public async Task<bool> AuthenticateAsync()
+    public async Task<bool> AuthenticateAsync(string accessToken, string refreshToken)
     {
         try
         {
-            var clientSecrets = new ClientSecrets { ClientId = _settings.GmailClientId, ClientSecret = _settings.GmailClientSecret };
-            _credential = await GoogleWebAuthorizationBroker.AuthorizeAsync(clientSecrets, _settings.GmailScopes, "user", CancellationToken.None, new FileDataStore("token.json", true));
-            _service = new Google.Apis.Gmail.v1.GmailService(new BaseClientService.Initializer { HttpClientInitializer = _credential, ApplicationName = _settings.ApplicationName });
+            var tokenResponse = new Google.Apis.Auth.OAuth2.Responses.TokenResponse
+            {
+                AccessToken = accessToken,
+                RefreshToken = refreshToken
+            };
+
+            var credential = new UserCredential(
+                new GoogleAuthorizationCodeFlow(
+                    new GoogleAuthorizationCodeFlow.Initializer
+                    {
+                        ClientSecrets = new ClientSecrets()
+                    }),
+                "user",
+                tokenResponse);
+
+            _service = new Google.Apis.Gmail.v1.GmailService(new BaseClientService.Initializer
+            {
+                HttpClientInitializer = credential,
+                ApplicationName = _settings.ApplicationName
+            });
+
             Console.WriteLine("Gmail authentication successful");
             return true;
         }
-        catch (Exception ex) { Console.WriteLine($"Gmail authentication failed: {ex.Message}"); return false; }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Gmail authentication failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    public void SetCurrentUser(long chatId)
+    {
+        _currentChatId = chatId;
     }
 
     public async Task<List<EmailMessage>> FetchInboxMessagesAsync(int maxResults = 10)
@@ -137,23 +164,27 @@ public class GmailClient
         try { await _service.Users.Messages.Delete("me", messageId).ExecuteAsync(); return true; }
         catch (Exception ex) { Console.WriteLine($"Error deleting message {messageId}: {ex.Message}"); return false; }
     }
+
     public async Task<bool> ArchiveMessageAsync(string messageId)
     {
         if (_service == null) return false;
         try { await _service.Users.Messages.Modify(new ModifyMessageRequest { RemoveLabelIds = new List<string> { "INBOX" } }, "me", messageId).ExecuteAsync(); return true; }
         catch (Exception ex) { Console.WriteLine($"Error archiving message {messageId}: {ex.Message}"); return false; }
     }
+
     public async Task<bool> StarMessageAsync(string messageId)
     {
         if (_service == null) return false;
         try { await _service.Users.Messages.Modify(new ModifyMessageRequest { AddLabelIds = new List<string> { "STARRED" } }, "me", messageId).ExecuteAsync(); return true; }
         catch (Exception ex) { Console.WriteLine($"Error starring message {messageId}: {ex.Message}"); return false; }
     }
+
     public async Task<bool> ModifyLabelsAsync(string messageId, List<string> labelsToAdd, List<string> labelsToRemove)
     {
         if (_service == null) return false;
         try { await _service.Users.Messages.Modify(new ModifyMessageRequest { AddLabelIds = labelsToAdd, RemoveLabelIds = labelsToRemove }, "me", messageId).ExecuteAsync(); return true; }
         catch (Exception ex) { Console.WriteLine($"Error modifying labels for message {messageId}: {ex.Message}"); return false; }
     }
+
     public async Task<string?> ForwardMessageAsync(string messageId, string toEmail) { await Task.CompletedTask; return null; }
 }
