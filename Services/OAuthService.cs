@@ -83,7 +83,9 @@ public class OAuthService
             };
 
             credentials.EmailAddress = await GetUserEmailAsync(credentials.AccessToken) ?? string.Empty;
+            Console.WriteLine($"[DEBUG] Retrieved user email: '{credentials.EmailAddress}'");
             _databaseService.SaveUserCredentials(credentials);
+            Console.WriteLine($"[DEBUG] User credentials saved to database");
             return credentials;
         }
         catch (Exception ex)
@@ -138,19 +140,34 @@ public class OAuthService
 
     private async Task<string?> GetUserEmailAsync(string accessToken)
     {
+        Console.WriteLine($"[DEBUG] GetUserEmailAsync called with token length: {accessToken?.Length ?? 0}");
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, "https://www.googleapis.com/oauth2/v2/userinfo");
             request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
+            Console.WriteLine("[DEBUG] Sending request to Google userinfo API...");
+            
             var response = await _httpClient.SendAsync(request);
+            Console.WriteLine($"[DEBUG] Userinfo API response status: {response.StatusCode}");
+            
             if (response.IsSuccessStatusCode)
             {
                 var content = await response.Content.ReadAsStringAsync();
+                Console.WriteLine($"[DEBUG] Userinfo API response content: {content}");
                 var userInfo = JsonConvert.DeserializeObject<GoogleUserInfo>(content);
+                Console.WriteLine($"[DEBUG] Parsed email: '{userInfo?.Email}'");
                 return userInfo?.Email;
             }
+            else
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                Console.WriteLine($"[ERROR] Userinfo API failed: {response.StatusCode} - {errorContent}");
+            }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ERROR] Exception in GetUserEmailAsync: {ex.Message}");
+        }
         return null;
     }
 

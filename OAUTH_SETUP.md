@@ -28,7 +28,8 @@ Create `settings.json` from the template:
   "database_path": "telegram_gmail.db",
   "gmail_scopes": [
     "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/gmail.modify"
+    "https://www.googleapis.com/auth/gmail.modify",
+    "https://www.googleapis.com/auth/userinfo.email"
   ],
   "oauth_callback_url": "http://localhost:8080/oauth/callback",
   "oauth_callback_port": 8080,

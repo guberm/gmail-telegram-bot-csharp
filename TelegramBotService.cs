@@ -50,7 +50,8 @@ public class TelegramBotService
     private async Task HandleMessageAsync(Message message, CancellationToken cancellationToken)
     {
         _chatId = message.Chat.Id;
-        var command = message.Text?.ToLower().Trim();
+        var messageText = message.Text?.Trim();
+        var command = messageText?.ToLower().Split(' ')[0];
         
         switch (command)
         {
@@ -65,6 +66,9 @@ public class TelegramBotService
                 break;
             case "/help":
                 await HandleHelpCommand(cancellationToken);
+                break;
+            case "/emails":
+                await HandleEmailsCommand(messageText, cancellationToken);
                 break;
             default:
                 await _botClient.SendTextMessageAsync(_chatId, 
@@ -192,7 +196,8 @@ public class TelegramBotService
 
             **Available Commands:**
             /start - Connect your Gmail account via OAuth
-            /status - Check your Gmail connection status  
+            /status - Check your Gmail connection status
+            /emails [count] - Fetch recent emails (default: 5, max: 20)
             /disconnect - Revoke access and delete credentials
             /help - Show this help message
 
@@ -222,6 +227,67 @@ public class TelegramBotService
             helpText,
             parseMode: ParseMode.Markdown,
             cancellationToken: cancellationToken);
+    }
+
+    private async Task HandleEmailsCommand(string? messageText, CancellationToken cancellationToken)
+    {
+        // Check if user is authenticated
+        if (!_databaseService.HasUserCredentials(_chatId))
+        {
+            await _botClient.SendTextMessageAsync(_chatId,
+                "❌ No Gmail account connected.\n\n" +
+                "Use /start to connect your Gmail account first.",
+                cancellationToken: cancellationToken);
+            return;
+        }
+
+        // Parse count parameter (default 5, max 20)
+        int count = 5;
+        if (!string.IsNullOrEmpty(messageText))
+        {
+            var parts = messageText.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length > 1 && int.TryParse(parts[1], out int parsedCount))
+            {
+                count = Math.Clamp(parsedCount, 1, 20);
+            }
+        }
+
+        try
+        {
+            await _botClient.SendTextMessageAsync(_chatId,
+                $"🔍 Fetching your last {count} email(s)...",
+                cancellationToken: cancellationToken);
+
+            // Fetch recent emails from Gmail
+            var emails = await _gmailService.GetRecentEmailsAsync(count);
+
+            if (emails == null || !emails.Any())
+            {
+                await _botClient.SendTextMessageAsync(_chatId,
+                    "📭 No emails found in your inbox.",
+                    cancellationToken: cancellationToken);
+                return;
+            }
+
+            // Send each email
+            foreach (var email in emails)
+            {
+                await SendEmailAsync(email, _chatId, cancellationToken);
+                await Task.Delay(500, cancellationToken); // Small delay to avoid rate limits
+            }
+
+            await _botClient.SendTextMessageAsync(_chatId,
+                $"✅ Sent {emails.Count} email(s).",
+                cancellationToken: cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error fetching emails: {ex.Message}");
+            await _botClient.SendTextMessageAsync(_chatId,
+                $"❌ Error fetching emails: {ex.Message}\n\n" +
+                "Please check your Gmail connection with /status",
+                cancellationToken: cancellationToken);
+        }
     }
 
     public async Task HandleOAuthSuccess(long chatId, string emailAddress, CancellationToken cancellationToken)
@@ -355,7 +421,46 @@ public class TelegramBotService
         catch (Exception ex)
         {
             Console.WriteLine($"Error sending email to Telegram: {ex.Message}");
-            try { await _botClient.SendTextMessageAsync(chatId, $"⚠️ Error delivering email: {emailMessage.Subject}\nPlease check the logs.", cancellationToken: cancellationToken); } catch { }
+            
+            // If message is too long, send a short version with link to Gmail
+            if (ex.Message.Contains("too long") || ex.Message.Contains("message is too long"))
+            {
+                try
+                {
+                    var shortMessage = BuildShortMessageText(emailMessage);
+                    var keyboard = BuildInlineKeyboard(emailMessage);
+                    var sentMessage = await _botClient.SendTextMessageAsync(chatId, shortMessage, parseMode: ParseMode.Html, replyMarkup: keyboard, cancellationToken: cancellationToken);
+                    emailMessage.TelegramMessageId = sentMessage.MessageId.ToString();
+                    _databaseService.InsertOrUpdateMessage(emailMessage);
+                }
+                catch (Exception ex2)
+                {
+                    Console.WriteLine($"Error sending short email to Telegram: {ex2.Message}");
+                    await SendMinimalNotification(chatId, emailMessage, cancellationToken);
+                }
+            }
+            else
+            {
+                await SendMinimalNotification(chatId, emailMessage, cancellationToken);
+            }
+        }
+    }
+
+    private async Task SendMinimalNotification(long chatId, EmailMessage emailMessage, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var minimalText = $"📧 New email from {EscapeHtml(emailMessage.Sender)}\n\n<a href=\"{emailMessage.DirectLink}\">Open in Gmail</a>";
+            await _botClient.SendTextMessageAsync(chatId, minimalText, parseMode: ParseMode.Html, cancellationToken: cancellationToken);
+        }
+        catch
+        {
+            // Last resort: plain text only
+            try
+            {
+                await _botClient.SendTextMessageAsync(chatId, $"📧 New email - check Gmail", cancellationToken: cancellationToken);
+            }
+            catch { }
         }
     }
 
@@ -365,19 +470,59 @@ public class TelegramBotService
         text.AppendLine($"<b>📧 {EscapeHtml(emailMessage.Subject)}</b>");
         text.AppendLine($"<b>From:</b> {EscapeHtml(emailMessage.Sender)}");
         text.AppendLine($"<b>Date:</b> {emailMessage.ReceivedDateTime:yyyy-MM-dd HH:mm:ss} UTC");
-        if (emailMessage.Labels.Any()) text.AppendLine($"<b>Labels:</b> {string.Join(" ", emailMessage.Labels.Select(l => $"#{l.Replace(" ", "_")}"))}");
+        if (emailMessage.Labels.Any()) text.AppendLine($"<b>Labels:</b> {string.Join(" ", emailMessage.Labels.Select(l => $"#{EscapeHtml(l.Replace(" ", "_"))}"))}");
         text.AppendLine();
-        var content = emailMessage.Content; if (content.Length > 2000) content = content[..2000] + "...";
+        
+        // Content - strip HTML and truncate if needed
+        var content = StripHtmlTags(emailMessage.Content);
+        if (content.Length > 2500) content = content[..2500] + "...";
         text.AppendLine(EscapeHtml(content));
+        
         if (emailMessage.Attachments.Any())
         {
             text.AppendLine();
             text.AppendLine("<b>📎 Attachments:</b>");
-            foreach (var attachment in emailMessage.Attachments) text.AppendLine($"• {EscapeHtml(attachment.Filename)} ({FormatFileSize(attachment.Size)})");
+            foreach (var attachment in emailMessage.Attachments) 
+                text.AppendLine($"• {EscapeHtml(attachment.Filename)} ({FormatFileSize(attachment.Size)})");
         }
         text.AppendLine();
         text.AppendLine($"<a href=\"{emailMessage.DirectLink}\">📬 Open in Gmail</a>");
         return text.ToString();
+    }
+
+    private string BuildShortMessageText(EmailMessage emailMessage)
+    {
+        var text = new System.Text.StringBuilder();
+        text.AppendLine($"<b>📧 {EscapeHtml(emailMessage.Subject)}</b>");
+        text.AppendLine();
+        text.AppendLine($"<b>From:</b> {EscapeHtml(emailMessage.Sender)}");
+        text.AppendLine($"<b>Date:</b> {emailMessage.ReceivedDateTime:yyyy-MM-dd HH:mm:ss} UTC");
+        text.AppendLine();
+        text.AppendLine("<i>(Message too long for Telegram)</i>");
+        text.AppendLine();
+        text.AppendLine($"<a href=\"{emailMessage.DirectLink}\">📬 Open in Gmail to read full message</a>");
+        return text.ToString();
+    }
+
+    private string StripHtmlTags(string html)
+    {
+        if (string.IsNullOrEmpty(html)) return string.Empty;
+        
+        // Remove script and style tags with their content
+        html = System.Text.RegularExpressions.Regex.Replace(html, "<(script|style|head)[^>]*>.*?</\\1>", "", 
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline);
+        
+        // Remove all HTML tags
+        html = System.Text.RegularExpressions.Regex.Replace(html, "<[^>]+>", " ");
+        
+        // Decode HTML entities
+        html = System.Net.WebUtility.HtmlDecode(html);
+        
+        // Clean up whitespace
+        html = System.Text.RegularExpressions.Regex.Replace(html, @"\s+", " ");
+        html = html.Trim();
+        
+        return html;
     }
 
     private InlineKeyboardMarkup BuildInlineKeyboard(EmailMessage emailMessage)

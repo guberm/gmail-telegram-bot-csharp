@@ -30,7 +30,11 @@ public class GmailClient
                 new GoogleAuthorizationCodeFlow(
                     new GoogleAuthorizationCodeFlow.Initializer
                     {
-                        ClientSecrets = new ClientSecrets()
+                        ClientSecrets = new ClientSecrets
+                        {
+                            ClientId = _settings.GoogleClientId,
+                            ClientSecret = _settings.GoogleClientSecret
+                        }
                     }),
                 "user",
                 tokenResponse);
@@ -78,6 +82,40 @@ public class GmailClient
         }
         catch (Exception ex) { Console.WriteLine($"Error fetching inbox messages: {ex.Message}"); throw; }
         return messages;
+    }
+
+    public async Task<(List<EmailMessage> messages, string? nextPageToken, bool hasMore)> FetchInboxMessagesWithPaginationAsync(int maxResults = 10, string? pageToken = null)
+    {
+        if (_service == null) throw new InvalidOperationException("Gmail service not authenticated");
+        var messages = new List<EmailMessage>();
+        try
+        {
+            var request = _service.Users.Messages.List("me");
+            request.LabelIds = new Google.Apis.Util.Repeatable<string>(new[] { "INBOX" });
+            request.MaxResults = maxResults;
+            if (!string.IsNullOrEmpty(pageToken))
+            {
+                request.PageToken = pageToken;
+            }
+            
+            var response = await request.ExecuteAsync();
+            if (response.Messages != null)
+            {
+                foreach (var messageItem in response.Messages)
+                {
+                    var fullMessage = await GetMessageDetailsAsync(messageItem.Id);
+                    if (fullMessage != null) messages.Add(fullMessage);
+                }
+            }
+            messages = messages.OrderByDescending(m => m.ReceivedDateTime).ToList();
+            
+            return (messages, response.NextPageToken, !string.IsNullOrEmpty(response.NextPageToken));
+        }
+        catch (Exception ex) 
+        { 
+            Console.WriteLine($"Error fetching inbox messages with pagination: {ex.Message}"); 
+            throw; 
+        }
     }
 
     private async Task<EmailMessage?> GetMessageDetailsAsync(string messageId)
@@ -161,8 +199,13 @@ public class GmailClient
     public async Task<bool> DeleteMessageAsync(string messageId)
     {
         if (_service == null) return false;
-        try { await _service.Users.Messages.Delete("me", messageId).ExecuteAsync(); return true; }
-        catch (Exception ex) { Console.WriteLine($"Error deleting message {messageId}: {ex.Message}"); return false; }
+        try 
+        { 
+            // Move to trash using the Messages.Trash endpoint instead of Modify
+            await _service.Users.Messages.Trash("me", messageId).ExecuteAsync(); 
+            return true; 
+        }
+        catch (Exception ex) { Console.WriteLine($"Error moving message {messageId} to trash: {ex.Message}"); return false; }
     }
 
     public async Task<bool> ArchiveMessageAsync(string messageId)
@@ -179,12 +222,35 @@ public class GmailClient
         catch (Exception ex) { Console.WriteLine($"Error starring message {messageId}: {ex.Message}"); return false; }
     }
 
+    public async Task<bool> MarkAsReadAsync(string messageId)
+    {
+        if (_service == null) return false;
+        try 
+        { 
+            // Mark as read by removing the UNREAD label
+            var request = new ModifyMessageRequest 
+            { 
+                RemoveLabelIds = new List<string> { "UNREAD" }
+            };
+            await _service.Users.Messages.Modify(request, "me", messageId).ExecuteAsync(); 
+            Console.WriteLine($"Message {messageId} marked as read successfully");
+            return true; 
+        }
+        catch (Exception ex) 
+        { 
+            Console.WriteLine($"Error marking message {messageId} as read: {ex.Message}"); 
+            return false; 
+        }
+    }
+
     public async Task<bool> ModifyLabelsAsync(string messageId, List<string> labelsToAdd, List<string> labelsToRemove)
     {
         if (_service == null) return false;
         try { await _service.Users.Messages.Modify(new ModifyMessageRequest { AddLabelIds = labelsToAdd, RemoveLabelIds = labelsToRemove }, "me", messageId).ExecuteAsync(); return true; }
         catch (Exception ex) { Console.WriteLine($"Error modifying labels for message {messageId}: {ex.Message}"); return false; }
     }
+
+    public async Task<List<EmailMessage>> GetRecentEmailsAsync(int count = 5) => await FetchInboxMessagesAsync(count);
 
     public async Task<string?> ForwardMessageAsync(string messageId, string toEmail) { await Task.CompletedTask; return null; }
 }

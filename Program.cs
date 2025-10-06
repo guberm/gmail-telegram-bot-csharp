@@ -47,7 +47,11 @@ class Program
             Console.WriteLine("Starting Telegram bot...");
             var gmailClient = new GmailClient(settings);
             var telegramService = new TelegramBotService(settings.TelegramBotToken, gmailClient, databaseService, oauthService, settings);
+            var emailPollingService = new EmailPollingService(gmailClient, telegramService, databaseService, settings);
             var cancellationTokenSource = new CancellationTokenSource();
+            
+            // Dictionary to track polling tasks for each user
+            var pollingTasks = new Dictionary<long, Task>();
             
             // Setup OAuth callback handling
             oauthCallbackServer.CallbackReceived += async (sender, e) =>
@@ -56,7 +60,7 @@ class Program
                 try
                 {
                     var credentials = await oauthService.ExchangeCodeForTokensAsync(
-                        e.AuthorizationCode, 
+                        e.Code, 
                         settings.GoogleClientId, 
                         settings.GoogleClientSecret, 
                         e.ChatId);
@@ -65,6 +69,35 @@ class Program
                     {
                         Console.WriteLine($"OAuth successful for {credentials.EmailAddress} (chat {e.ChatId})");
                         await telegramService.HandleOAuthSuccess(e.ChatId, credentials.EmailAddress, cancellationTokenSource.Token);
+                        
+                        // Authenticate Gmail client with user's tokens
+                        var authSuccess = await gmailClient.AuthenticateAsync(credentials.AccessToken, credentials.RefreshToken);
+                        if (!authSuccess)
+                        {
+                            Console.WriteLine($"Failed to authenticate Gmail client for chat {e.ChatId}");
+                            return;
+                        }
+                        
+                        // Set the current user for Gmail client
+                        gmailClient.SetCurrentUser(e.ChatId);
+                        
+                        // Start email polling for this user
+                        if (!pollingTasks.ContainsKey(e.ChatId))
+                        {
+                            Console.WriteLine($"Starting email polling for user {credentials.EmailAddress}");
+                            var pollingTask = Task.Run(async () =>
+                            {
+                                try
+                                {
+                                    await emailPollingService.StartPollingAsync(e.ChatId, cancellationTokenSource.Token);
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine($"Email polling error for chat {e.ChatId}: {ex.Message}");
+                                }
+                            });
+                            pollingTasks[e.ChatId] = pollingTask;
+                        }
                     }
                     else
                     {
@@ -79,6 +112,31 @@ class Program
             
             await telegramService.StartAsync(cancellationTokenSource.Token);
             Console.WriteLine("Telegram bot started\n");
+            
+            // Start email polling for any existing authenticated users
+            Console.WriteLine("Checking for existing authenticated users...");
+            var existingUsers = databaseService.GetAllUserCredentials();
+            Console.WriteLine($"Found {existingUsers.Count} existing authenticated users");
+            
+            foreach (var user in existingUsers)
+            {
+                if (!pollingTasks.ContainsKey(user.ChatId))
+                {
+                    Console.WriteLine($"Starting email polling for existing user {user.EmailAddress} (chat {user.ChatId})");
+                    var pollingTask = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await emailPollingService.StartPollingAsync(user.ChatId, cancellationTokenSource.Token);
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"Email polling error for chat {user.ChatId}: {ex.Message}");
+                        }
+                    });
+                    pollingTasks[user.ChatId] = pollingTask;
+                }
+            }
             
             Console.WriteLine("Bot is ready!");
             Console.WriteLine("Users can authenticate via Telegram by sending /start to the bot");
