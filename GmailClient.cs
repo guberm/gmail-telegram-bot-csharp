@@ -252,5 +252,42 @@ public class GmailClient
 
     public async Task<List<EmailMessage>> GetRecentEmailsAsync(int count = 5) => await FetchInboxMessagesAsync(count);
 
+    public async Task<bool> MessageStillInInboxAsync(string messageId)
+    {
+        if (_service == null) 
+        {
+            Console.WriteLine($"[SYNC-DEBUG] Gmail service is null for message {messageId}");
+            return false;
+        }
+        
+        try
+        {
+            Console.WriteLine($"[SYNC-DEBUG] Checking if message {messageId} is still in INBOX...");
+            var message = await _service.Users.Messages.Get("me", messageId).ExecuteAsync();
+            
+            // Check if message is still in INBOX (not deleted from inbox)
+            bool isInInbox = message.LabelIds != null && message.LabelIds.Contains("INBOX");
+            
+            if (!isInInbox)
+            {
+                Console.WriteLine($"[SYNC-DEBUG] Message {messageId} is NO LONGER in INBOX - treating as deleted from inbox");
+                return false;
+            }
+            
+            Console.WriteLine($"[SYNC-DEBUG] Message {messageId} is still in INBOX");
+            return true;
+        }
+        catch (Google.GoogleApiException ex) when (ex.HttpStatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            Console.WriteLine($"[SYNC-DEBUG] Message {messageId} NOT FOUND in Gmail (404) - completely deleted");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[SYNC-DEBUG] Error checking message existence for {messageId}: {ex.Message}");
+            return true; // Assume exists to avoid false deletions
+        }
+    }
+
     public async Task<string?> ForwardMessageAsync(string messageId, string toEmail) { await Task.CompletedTask; return null; }
 }

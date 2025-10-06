@@ -110,6 +110,54 @@ public partial class DatabaseService : IDisposable
         }
         return actions;
     }
+
+    public List<EmailMessage> GetAllMessagesForUser(long chatId)
+    {
+        var sql = @"SELECT m.* FROM messages m 
+                   JOIN user_credentials u ON 1=1 
+                   WHERE u.chat_id = @chat_id";
+        var messages = new List<EmailMessage>();
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = sql;
+        cmd.Parameters.AddWithValue("@chat_id", chatId);
+        using var reader = cmd.ExecuteReader();
+        
+        while (reader.Read())
+        {
+            var message = new EmailMessage
+            {
+                MessageId = reader.GetString(0),
+                Subject = reader.GetString(1),
+                Sender = reader.GetString(2),
+                ReceivedDateTime = DateTime.Parse(reader.GetString(3)),
+                Content = reader.GetString(4),
+                Attachments = JsonConvert.DeserializeObject<List<EmailAttachment>>(reader.GetString(5)) ?? new List<EmailAttachment>(),
+                Labels = JsonConvert.DeserializeObject<List<string>>(reader.GetString(6)) ?? new List<string>(),
+                DirectLink = reader.GetString(7),
+                IsRead = reader.GetInt32(8) == 1,
+                TelegramMessageId = reader.IsDBNull(9) ? null : reader.GetString(9)
+            };
+            messages.Add(message);
+        }
+        return messages;
+    }
+
+    public bool DeleteMessage(string messageId)
+    {
+        try
+        {
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText = "DELETE FROM messages WHERE message_id = @message_id";
+            cmd.Parameters.AddWithValue("@message_id", messageId);
+            var rowsAffected = cmd.ExecuteNonQuery();
+            return rowsAffected > 0;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error deleting message {messageId}: {ex.Message}");
+            return false;
+        }
+    }
     
     public void Dispose() => _connection?.Dispose();
 }

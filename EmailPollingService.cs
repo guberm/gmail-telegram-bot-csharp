@@ -65,6 +65,9 @@ public class EmailPollingService
         
         _gmailService.SetCurrentUser(chatId);
         Console.WriteLine($"[DEBUG] Gmail client authenticated for user {credentials.EmailAddress}");
+
+        // First: Check for email synchronization (deleted emails)
+        await SynchronizeDeletedEmailsAsync(chatId, cancellationToken);
         
         var retryCount = 0; const int maxRetries = 3;
         while (retryCount < maxRetries)
@@ -137,6 +140,128 @@ public class EmailPollingService
                 Console.WriteLine($"Retrying in {delay.TotalSeconds} seconds...");
                 await Task.Delay(delay, cancellationToken);
             }
+        }
+    }
+
+    private async Task SynchronizeDeletedEmailsAsync(long chatId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            Console.WriteLine($"[SYNC] Starting email synchronization for chat {chatId}");
+            
+            // Get all stored messages for this user from database
+            var allStoredMessages = _databaseService.GetAllMessagesForUser(chatId);
+            if (!allStoredMessages.Any())
+            {
+                Console.WriteLine($"[SYNC] No stored messages found for chat {chatId}");
+                return;
+            }
+
+            // Only check recent messages (last 20) to avoid checking very old emails
+            var recentStoredMessages = allStoredMessages
+                .OrderByDescending(m => m.ReceivedDateTime)
+                .Take(20)
+                .ToList();
+
+            Console.WriteLine($"[SYNC] Found {allStoredMessages.Count} stored messages total, checking {recentStoredMessages.Count} recent messages in Gmail...");
+
+            var deletedCount = 0;
+            Console.WriteLine($"[SYNC] Starting to check {recentStoredMessages.Count} messages...");
+            
+            foreach (var storedMessage in recentStoredMessages)
+            {
+                try
+                {
+                    Console.WriteLine($"[SYNC-DEBUG] Checking message {storedMessage.MessageId} (Subject: '{storedMessage.Subject}')");
+                    
+                    // Check if message still exists in Gmail INBOX
+                    var stillInInbox = await _gmailService.MessageStillInInboxAsync(storedMessage.MessageId);
+                    
+                    Console.WriteLine($"[SYNC-DEBUG] Message {storedMessage.MessageId} still in INBOX: {stillInInbox}");
+                    
+                    if (!stillInInbox)
+                    {
+                        Console.WriteLine($"[SYNC] Message {storedMessage.MessageId} no longer in INBOX, deleting from Telegram...");
+                        
+                        // Delete from Telegram if we have the Telegram message ID
+                        if (!string.IsNullOrEmpty(storedMessage.TelegramMessageId))
+                        {
+                            var deleteSuccess = await _telegramService.DeleteTelegramMessageAsync(chatId, storedMessage.TelegramMessageId, cancellationToken);
+                            if (deleteSuccess)
+                            {
+                                Console.WriteLine($"[SYNC] Successfully deleted Telegram message {storedMessage.TelegramMessageId}");
+                            }
+                            else
+                            {
+                                Console.WriteLine($"[SYNC] Failed to delete Telegram message {storedMessage.TelegramMessageId} (message may already be deleted)");
+                            }
+                        }
+                        
+                        // Remove from database (always try to clean up, even if Telegram deletion failed)
+                        try
+                        {
+                            var dbDeleteSuccess = _databaseService.DeleteMessage(storedMessage.MessageId);
+                            if (dbDeleteSuccess)
+                            {
+                                deletedCount++;
+                                Console.WriteLine($"[SYNC] Removed message '{storedMessage.Subject}' from database. Deleted count is now: {deletedCount}");
+                            }
+                            else
+                            {
+                                Console.WriteLine($"[SYNC] Failed to delete message '{storedMessage.Subject}' from database");
+                            }
+                        }
+                        catch (Exception dbEx)
+                        {
+                            Console.WriteLine($"[SYNC] Database deletion error for message {storedMessage.MessageId}: {dbEx.Message}");
+                            // Don't increment deletedCount for failed database deletions
+                        }
+                        
+                        // Small delay to avoid hitting rate limits
+                        await Task.Delay(200, cancellationToken);
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[SYNC-DEBUG] Message {storedMessage.MessageId} is still in INBOX - no action needed");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[SYNC] Error checking message {storedMessage.MessageId}: {ex.Message}");
+                    // Continue with other messages
+                }
+            }
+
+            Console.WriteLine($"[SYNC] Finished checking all messages. Total deleted count: {deletedCount}");
+
+            if (deletedCount > 0)
+            {
+                Console.WriteLine($"[SYNC] Synchronized {deletedCount} deleted emails for chat {chatId}");
+                
+                // Notify user about synchronization
+                try
+                {
+                    var notificationText = deletedCount == 1 
+                        ? "✅ Synced: 1 deleted email removed from chat"
+                        : $"✅ Synced: {deletedCount} deleted emails removed from chat";
+                    
+                    Console.WriteLine($"[SYNC] Sending notification: {notificationText}");
+                    await _telegramService.NotifyAsync(notificationText, cancellationToken);
+                    Console.WriteLine($"[SYNC] Notification sent successfully");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[SYNC] Failed to notify user about synchronization: {ex.Message}");
+                }
+            }
+            else
+            {
+                Console.WriteLine($"[SYNC] No deleted emails found for chat {chatId} - no notification will be sent");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[SYNC] Error during email synchronization for chat {chatId}: {ex.Message}");
         }
     }
 }

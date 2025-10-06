@@ -70,6 +70,12 @@ public class TelegramBotService
             case "/emails":
                 await HandleEmailsCommand(messageText, cancellationToken);
                 break;
+            case "/test_sync":
+                await HandleTestSyncCommand(messageText, cancellationToken);
+                break;
+            case "/cleanup_sync":
+                await HandleCleanupSyncCommand(cancellationToken);
+                break;
             default:
                 await _botClient.SendTextMessageAsync(_chatId, 
                     "❓ Unknown command. Type /help to see available commands.", 
@@ -199,6 +205,8 @@ public class TelegramBotService
             /status - Check your Gmail connection status
             /emails [count] - Fetch recent emails (default: 5, max: 20)
             /disconnect - Revoke access and delete credentials
+            /test_sync <message_id> - Test sync status for specific message
+            /cleanup_sync - Clean up orphaned database entries
             /help - Show this help message
 
             **How it works:**
@@ -206,6 +214,7 @@ public class TelegramBotService
             2️⃣ Authorize the bot in your browser
             3️⃣ New emails will be forwarded here automatically
             4️⃣ Use action buttons on each email to manage them
+            5️⃣ Emails deleted in Gmail will auto-sync to Telegram
 
             **Email Actions:**
             🗑️ Delete - Move email to trash
@@ -219,6 +228,11 @@ public class TelegramBotService
             🚫 No passwords are stored
             ⏰ Tokens auto-refresh as needed
             🛡️ You can revoke access anytime
+
+            **Email Synchronization:**
+            🔄 Auto-sync when emails are deleted in Gmail
+            🗑️ Telegram messages will be removed automatically
+            ⚡ Real-time synchronization during polling
 
             **Need help?** Check the documentation or report issues on GitHub.
             """;
@@ -286,6 +300,140 @@ public class TelegramBotService
             await _botClient.SendTextMessageAsync(_chatId,
                 $"❌ Error fetching emails: {ex.Message}\n\n" +
                 "Please check your Gmail connection with /status",
+                cancellationToken: cancellationToken);
+        }
+    }
+
+    private async Task HandleTestSyncCommand(string messageText, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var parts = messageText.Split(' ');
+            if (parts.Length < 2)
+            {
+                await _botClient.SendTextMessageAsync(_chatId,
+                    "❓ Usage: `/test_sync <message_id>`\n\n" +
+                    "Example: `/test_sync 199b981d77b0cc02`\n\n" +
+                    "This will test if a specific Gmail message still exists.",
+                    parseMode: ParseMode.Markdown,
+                    cancellationToken: cancellationToken);
+                return;
+            }
+
+            var messageId = parts[1].Trim();
+            
+            await _botClient.SendTextMessageAsync(_chatId,
+                $"🔍 Testing sync for message ID: `{messageId}`\n\n" +
+                "Checking if message is still in INBOX...",
+                parseMode: ParseMode.Markdown,
+                cancellationToken: cancellationToken);
+
+            // Check if message is still in INBOX
+            var stillInInbox = await _gmailService.MessageStillInInboxAsync(messageId);
+            
+            // Check if message exists in database
+            var existsInDb = _databaseService.MessageExists(messageId);
+            
+            var result = $"📊 **Sync Test Results for {messageId}**\n\n" +
+                        $"📧 Still in INBOX: {(stillInInbox ? "✅ Yes" : "❌ No")}\n" +
+                        $"🗄️ Exists in Database: {(existsInDb ? "✅ Yes" : "❌ No")}\n\n";
+
+            if (!stillInInbox && existsInDb)
+            {
+                result += "⚠️ **Sync Issue Detected!**\n" +
+                         "Message removed from INBOX but still in database.\n" +
+                         "This should be automatically synced in next polling cycle.";
+            }
+            else if (stillInInbox && !existsInDb)
+            {
+                result += "ℹ️ **Normal State**\n" +
+                         "Message in INBOX but not in database.\n" +
+                         "This is normal for messages not yet processed.";
+            }
+            else if (!stillInInbox && !existsInDb)
+            {
+                result += "✅ **Synced State**\n" +
+                         "Message properly removed from both INBOX and database.";
+            }
+            else
+            {
+                result += "✅ **Normal State**\n" +
+                         "Message exists in both INBOX and database.";
+            }
+
+            await _botClient.SendTextMessageAsync(_chatId,
+                result,
+                parseMode: ParseMode.Markdown,
+                cancellationToken: cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error in test sync: {ex.Message}");
+            await _botClient.SendTextMessageAsync(_chatId,
+                $"❌ Error testing sync: {ex.Message}",
+                cancellationToken: cancellationToken);
+        }
+    }
+
+    private async Task HandleCleanupSyncCommand(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _botClient.SendTextMessageAsync(_chatId,
+                "🧹 Starting database cleanup...\n\n" +
+                "Checking all stored messages against Gmail INBOX...",
+                cancellationToken: cancellationToken);
+
+            // Get all stored messages for this user
+            var allStoredMessages = _databaseService.GetAllMessagesForUser(_chatId);
+            var cleanedCount = 0;
+            var totalMessages = allStoredMessages.Count;
+
+            await _botClient.SendTextMessageAsync(_chatId,
+                $"📊 Found {totalMessages} messages in database. Starting cleanup...",
+                cancellationToken: cancellationToken);
+
+            foreach (var storedMessage in allStoredMessages)
+            {
+                try
+                {
+                    // Check if message still exists in Gmail INBOX
+                    var stillInInbox = await _gmailService.MessageStillInInboxAsync(storedMessage.MessageId);
+                    
+                    if (!stillInInbox)
+                    {
+                        // Message no longer in INBOX, clean it up
+                        var dbDeleteSuccess = _databaseService.DeleteMessage(storedMessage.MessageId);
+                        if (dbDeleteSuccess)
+                        {
+                            cleanedCount++;
+                            Console.WriteLine($"[CLEANUP] Removed orphaned message '{storedMessage.Subject}' from database");
+                        }
+                    }
+                    
+                    // Small delay to avoid hitting Gmail API rate limits
+                    await Task.Delay(100, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[CLEANUP] Error checking message {storedMessage.MessageId}: {ex.Message}");
+                }
+            }
+
+            await _botClient.SendTextMessageAsync(_chatId,
+                $"✅ **Cleanup Complete!**\n\n" +
+                $"📊 Total messages checked: {totalMessages}\n" +
+                $"🧹 Orphaned messages removed: {cleanedCount}\n" +
+                $"💾 Remaining messages: {totalMessages - cleanedCount}\n\n" +
+                "Database is now synchronized with Gmail INBOX.",
+                parseMode: ParseMode.Markdown,
+                cancellationToken: cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error in cleanup sync: {ex.Message}");
+            await _botClient.SendTextMessageAsync(_chatId,
+                $"❌ Error during cleanup: {ex.Message}",
                 cancellationToken: cancellationToken);
         }
     }
@@ -547,5 +695,28 @@ public class TelegramBotService
     private Task HandleErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken) { Console.WriteLine($"Telegram Bot Error: {exception.Message}"); return Task.CompletedTask; }
     public async Task NotifyErrorAsync(string errorMessage, CancellationToken cancellationToken)
     { if (_chatId != 0) { try { await _botClient.SendTextMessageAsync(_chatId, $"⚠️ Error: {errorMessage}", cancellationToken: cancellationToken); } catch { } } }
+
+    public async Task NotifyAsync(string message, CancellationToken cancellationToken)
+    { if (_chatId != 0) { try { await _botClient.SendTextMessageAsync(_chatId, message, cancellationToken: cancellationToken); } catch { } } }
+
+    public async Task<bool> DeleteTelegramMessageAsync(long chatId, string telegramMessageId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (int.TryParse(telegramMessageId, out int messageId))
+            {
+                await _botClient.DeleteMessageAsync(chatId, messageId, cancellationToken);
+                Console.WriteLine($"Deleted Telegram message {telegramMessageId} from chat {chatId}");
+                return true;
+            }
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error deleting Telegram message {telegramMessageId}: {ex.Message}");
+            return false;
+        }
+    }
+
     public void SetChatId(long chatId) => _chatId = chatId;
 }
