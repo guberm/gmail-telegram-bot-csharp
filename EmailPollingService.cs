@@ -148,6 +148,8 @@ public class EmailPollingService
         try
         {
             Console.WriteLine($"[SYNC] Starting email synchronization for chat {chatId}");
+            // Feature flag: control whether we send user-facing notifications about deletions
+            const bool EnableSyncNotifications = false; // Set to true to re-enable user notifications
             
             // Get all stored messages for this user from database
             var allStoredMessages = _databaseService.GetAllMessagesForUser(chatId);
@@ -237,26 +239,32 @@ public class EmailPollingService
             if (deletedCount > 0)
             {
                 Console.WriteLine($"[SYNC] Synchronized {deletedCount} deleted emails for chat {chatId}");
-                
-                // Notify user about synchronization
-                try
+                if (EnableSyncNotifications)
                 {
-                    var notificationText = deletedCount == 1 
-                        ? "✅ Synced: 1 deleted email removed from chat"
-                        : $"✅ Synced: {deletedCount} deleted emails removed from chat";
-                    
-                    Console.WriteLine($"[SYNC] Sending notification: {notificationText}");
-                    await _telegramService.NotifyAsync(notificationText, cancellationToken);
-                    Console.WriteLine($"[SYNC] Notification sent successfully");
+                    // Notify user about synchronization
+                    try
+                    {
+                        var notificationText = deletedCount == 1 
+                            ? "✅ Synced: 1 deleted email removed from chat"
+                            : $"✅ Synced: {deletedCount} deleted emails removed from chat";
+                        
+                        Console.WriteLine($"[SYNC] Sending notification: {notificationText}");
+                        await _telegramService.NotifyAsync(notificationText, cancellationToken);
+                        Console.WriteLine($"[SYNC] Notification sent successfully");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[SYNC] Failed to notify user about synchronization: {ex.Message}");
+                    }
                 }
-                catch (Exception ex)
+                else
                 {
-                    Console.WriteLine($"[SYNC] Failed to notify user about synchronization: {ex.Message}");
+                    Console.WriteLine("[SYNC] Notifications disabled - not sending user message about deletions");
                 }
             }
             else
             {
-                Console.WriteLine($"[SYNC] No deleted emails found for chat {chatId} - no notification will be sent");
+                Console.WriteLine($"[SYNC] No deleted emails found for chat {chatId}");
             }
         }
         catch (Exception ex)
