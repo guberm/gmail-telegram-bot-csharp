@@ -13,4 +13,6 @@
   "oauth_callback_url": "http://localhost:8080/oauth/callback",
   "oauth_callback_port": 8080,
   "application_name": "Telegram Gmail Bot"
+  ,
+  "enable_sync_notifications": false
 }

@@ -148,8 +148,7 @@ public class EmailPollingService
         try
         {
             Console.WriteLine($"[SYNC] Starting email synchronization for chat {chatId}");
-            // Feature flag: control whether we send user-facing notifications about deletions
-            const bool EnableSyncNotifications = false; // Set to true to re-enable user notifications
+            // Using configuration flag: _settings.EnableSyncNotifications
             
             // Get all stored messages for this user from database
             var allStoredMessages = _databaseService.GetAllMessagesForUser(chatId);
@@ -239,7 +238,7 @@ public class EmailPollingService
             if (deletedCount > 0)
             {
                 Console.WriteLine($"[SYNC] Synchronized {deletedCount} deleted emails for chat {chatId}");
-                if (EnableSyncNotifications)
+                if (_settings.EnableSyncNotifications)
                 {
                     // Notify user about synchronization
                     try

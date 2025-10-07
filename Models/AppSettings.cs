@@ -14,6 +14,13 @@ public class AppSettings
     [JsonProperty("oauth_callback_port")] public int OAuthCallbackPort { get; set; } = 8080;
     [JsonProperty("application_name")] public string ApplicationName { get; set; } = "Telegram Gmail Bot";
     
+    /// <summary>
+    /// When true, the bot will send Telegram notifications after it synchronizes deletions
+    /// from Gmail (e.g., "✅ Synced: X deleted emails removed from chat"). Default is false
+    /// to avoid noisy messages. Configure in settings.json via "enable_sync_notifications".
+    /// </summary>
+    [JsonProperty("enable_sync_notifications")] public bool EnableSyncNotifications { get; set; } = false;
+    
     public static AppSettings LoadFromFile(string path) =>
         JsonConvert.DeserializeObject<AppSettings>(File.ReadAllText(path)) ?? new AppSettings();
 }
