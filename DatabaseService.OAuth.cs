@@ -155,4 +155,21 @@ public partial class DatabaseService
         }
         return credentials;
     }
+
+    /// <summary>
+    /// Removes expired or invalid user credentials from the database.
+    /// </summary>
+    /// <param name="chatId">The chat ID of the user whose expired credentials should be cleaned up.</param>
+    public void CleanupExpiredCredentials(long chatId)
+    {
+        var sql = "DELETE FROM user_credentials WHERE chat_id = @chat_id";
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = sql;
+        cmd.Parameters.AddWithValue("@chat_id", chatId);
+        var rowsAffected = cmd.ExecuteNonQuery();
+        if (rowsAffected > 0)
+        {
+            Console.WriteLine($"[DEBUG] Cleaned up expired credentials for chat {chatId}");
+        }
+    }
 }

@@ -15,8 +15,10 @@
   <ItemGroup>
     <PackageReference Include="Google.Apis.Gmail.v1" Version="1.70.0.3833" />
     <PackageReference Include="Google.Apis.Auth" Version="1.72.0" />
+    <PackageReference Include="Markdig" Version="0.42.0" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.9" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
     <PackageReference Include="Telegram.Bot" Version="22.7.2" />
+    <PackageReference Include="Telegram.Bot.Extensions.Markup" Version="1.0.2" />
   </ItemGroup>
 </Project>

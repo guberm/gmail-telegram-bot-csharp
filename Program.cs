@@ -45,7 +45,7 @@ class Program
             Console.WriteLine($"OAuth server running on port {settings.OAuthCallbackPort}\n");
             
             Console.WriteLine("Starting Telegram bot...");
-            var gmailClient = new GmailClient(settings);
+            var gmailClient = new GmailClient(settings, databaseService);
             var telegramService = new TelegramBotService(settings.TelegramBotToken, gmailClient, databaseService, oauthService, settings);
             var emailPollingService = new EmailPollingService(gmailClient, telegramService, databaseService, settings);
             var cancellationTokenSource = new CancellationTokenSource();
@@ -69,6 +69,9 @@ class Program
                     {
                         Console.WriteLine($"OAuth successful for {credentials.EmailAddress} (chat {e.ChatId})");
                         await telegramService.HandleOAuthSuccess(e.ChatId, credentials.EmailAddress, cancellationTokenSource.Token);
+                        
+                        // Clear any previous authentication failure status
+                        emailPollingService.ClearAuthenticationFailure(e.ChatId);
                         
                         // Authenticate Gmail client with user's tokens
                         var authSuccess = await gmailClient.AuthenticateAsync(credentials.AccessToken, credentials.RefreshToken);

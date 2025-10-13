@@ -15,14 +15,21 @@ namespace TelegramGmailBot.Services;
 public class GmailClient
 {
     private readonly AppSettings _settings;
+    private readonly DatabaseService _databaseService;
     private Google.Apis.Gmail.v1.GmailService? _service;
     private long _currentChatId;
+    private UserCredential? _credential;
 
     /// <summary>
-    /// Initializes a new instance of the GmailClient with the specified application settings.
+    /// Initializes a new instance of the GmailClient with the specified application settings and database service.
     /// </summary>
     /// <param name="settings">The application settings containing Gmail API configuration.</param>
-    public GmailClient(AppSettings settings) { _settings = settings; }
+    /// <param name="databaseService">The database service for updating stored credentials.</param>
+    public GmailClient(AppSettings settings, DatabaseService databaseService) 
+    { 
+        _settings = settings; 
+        _databaseService = databaseService;
+    }
 
     /// <summary>
     /// Authenticates the Gmail client using OAuth2 access and refresh tokens.
@@ -40,22 +47,34 @@ public class GmailClient
                 RefreshToken = refreshToken
             };
 
-            var credential = new UserCredential(
-                new GoogleAuthorizationCodeFlow(
-                    new GoogleAuthorizationCodeFlow.Initializer
+            var flow = new GoogleAuthorizationCodeFlow(
+                new GoogleAuthorizationCodeFlow.Initializer
+                {
+                    ClientSecrets = new ClientSecrets
                     {
-                        ClientSecrets = new ClientSecrets
-                        {
-                            ClientId = _settings.GoogleClientId,
-                            ClientSecret = _settings.GoogleClientSecret
-                        }
-                    }),
-                "user",
-                tokenResponse);
+                        ClientId = _settings.GoogleClientId,
+                        ClientSecret = _settings.GoogleClientSecret
+                    },
+                    Scopes = new[] { "https://www.googleapis.com/auth/gmail.readonly", "https://www.googleapis.com/auth/gmail.modify" },
+                    DataStore = null // We'll handle token storage manually
+                });
+
+            _credential = new UserCredential(flow, "user", tokenResponse);
+            
+            // Try to refresh the token if it's expired/stale
+            if (tokenResponse.IsStale)
+            {
+                Console.WriteLine("[DEBUG] Access token is stale, attempting to refresh...");
+                await _credential.RefreshTokenAsync(CancellationToken.None);
+                Console.WriteLine("[DEBUG] Token refresh successful");
+                
+                // Update stored credentials with refreshed token
+                await UpdateStoredCredentialsAsync();
+            }
 
             _service = new Google.Apis.Gmail.v1.GmailService(new BaseClientService.Initializer
             {
-                HttpClientInitializer = credential,
+                HttpClientInitializer = _credential,
                 ApplicationName = _settings.ApplicationName
             });
 
@@ -65,6 +84,7 @@ public class GmailClient
         catch (Exception ex)
         {
             Console.WriteLine($"Gmail authentication failed: {ex.Message}");
+            Console.WriteLine($"[DEBUG] Exception details: {ex}");
             return false;
         }
     }
@@ -76,6 +96,47 @@ public class GmailClient
     public void SetCurrentUser(long chatId)
     {
         _currentChatId = chatId;
+    }
+
+    /// <summary>
+    /// Gets the current access token from the authenticated credential, refreshing if necessary.
+    /// </summary>
+    /// <returns>The current access token, or null if not authenticated.</returns>
+    public async Task<string?> GetCurrentAccessTokenAsync()
+    {
+        if (_service?.HttpClientInitializer is UserCredential credential)
+        {
+            var token = await credential.GetAccessTokenForRequestAsync();
+            return token;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Updates the stored credentials in the database with the current token information.
+    /// </summary>
+    private async Task UpdateStoredCredentialsAsync()
+    {
+        if (_credential?.Token != null && _currentChatId != 0)
+        {
+            var currentCreds = _databaseService.GetUserCredentials(_currentChatId);
+            if (currentCreds != null)
+            {
+                currentCreds.AccessToken = _credential.Token.AccessToken;
+                if (!string.IsNullOrEmpty(_credential.Token.RefreshToken))
+                {
+                    currentCreds.RefreshToken = _credential.Token.RefreshToken;
+                }
+                if (_credential.Token.ExpiresInSeconds.HasValue)
+                {
+                    currentCreds.ExpiresAt = DateTime.UtcNow.AddSeconds(_credential.Token.ExpiresInSeconds.Value);
+                }
+                currentCreds.UpdatedAt = DateTime.UtcNow;
+                
+                _databaseService.SaveUserCredentials(currentCreds);
+                Console.WriteLine("[DEBUG] Updated stored credentials after token refresh");
+            }
+        }
     }
 
     /// <summary>

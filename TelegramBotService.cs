@@ -19,6 +19,7 @@ public class TelegramBotService
     private readonly DatabaseService _databaseService;
     private readonly OAuthService _oauthService;
     private readonly AppSettings _settings;
+    private readonly TelegramMessageFormatter _messageFormatter;
     private long _chatId;
 
     /// <summary>
@@ -36,6 +37,7 @@ public class TelegramBotService
         _databaseService = databaseService;
         _oauthService = oauthService;
         _settings = settings;
+        _messageFormatter = new TelegramMessageFormatter();
     }
 
     /// <summary>
@@ -589,7 +591,7 @@ public class TelegramBotService
     {
         try
         {
-            var messageText = BuildMessageText(emailMessage);
+            var messageText = _messageFormatter.BuildFormattedMessage(emailMessage);
             var keyboard = BuildInlineKeyboard(emailMessage);
             var sentMessage = await _botClient.SendMessage(chatId, messageText, parseMode: ParseMode.Html, replyMarkup: keyboard, cancellationToken: cancellationToken);
             emailMessage.TelegramMessageId = sentMessage.MessageId.ToString();
@@ -604,7 +606,7 @@ public class TelegramBotService
             {
                 try
                 {
-                    var shortMessage = BuildShortMessageText(emailMessage);
+                    var shortMessage = _messageFormatter.BuildShortMessage(emailMessage);
                     var keyboard = BuildInlineKeyboard(emailMessage);
                     var sentMessage = await _botClient.SendMessage(chatId, shortMessage, parseMode: ParseMode.Html, replyMarkup: keyboard, cancellationToken: cancellationToken);
                     emailMessage.TelegramMessageId = sentMessage.MessageId.ToString();
@@ -623,19 +625,45 @@ public class TelegramBotService
         }
     }
 
+    /// <summary>
+    /// Sends a simple text notification message to a Telegram chat.
+    /// </summary>
+    /// <param name="message">The message text to send (supports HTML formatting).</param>
+    /// <param name="chatId">The Telegram chat ID to send the message to.</param>
+    /// <param name="cancellationToken">Cancellation token for the async operation.</param>
+    public async Task SendTextNotificationAsync(string message, long chatId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _botClient.SendMessage(chatId, message, parseMode: ParseMode.Html, cancellationToken: cancellationToken);
+        }
+        catch
+        {
+            // Fallback to plain text if HTML parsing fails
+            try
+            {
+                await _botClient.SendMessage(chatId, message, cancellationToken: cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Failed to send text notification to chat {chatId}: {ex.Message}");
+            }
+        }
+    }
+
     private async Task SendMinimalNotification(long chatId, EmailMessage emailMessage, CancellationToken cancellationToken)
     {
         try
         {
-            var minimalText = $"📧 New email from {EscapeHtml(emailMessage.Sender)}\n\n<a href=\"{emailMessage.DirectLink}\">Open in Gmail</a>";
-            await _botClient.SendMessage(chatId, minimalText, parseMode: ParseMode.Html, cancellationToken: cancellationToken);
+            var minimalMessage = _messageFormatter.BuildMinimalMessage(emailMessage);
+            await _botClient.SendMessage(chatId, minimalMessage, parseMode: ParseMode.Html, cancellationToken: cancellationToken);
         }
         catch
         {
             // Last resort: plain text only
             try
             {
-                await _botClient.SendMessage(chatId, $"📧 New email - check Gmail", cancellationToken: cancellationToken);
+                await _botClient.SendMessage(chatId, $"📧 New email from {emailMessage.Sender?.Split('<')[0]?.Trim() ?? "Unknown"} - check Gmail", cancellationToken: cancellationToken);
             }
             catch { }
         }
@@ -644,40 +672,137 @@ public class TelegramBotService
     private string BuildMessageText(EmailMessage emailMessage)
     {
         var text = new System.Text.StringBuilder();
-        text.AppendLine($"<b>📧 {EscapeHtml(emailMessage.Subject)}</b>");
-        text.AppendLine($"<b>From:</b> {EscapeHtml(emailMessage.Sender)}");
-        text.AppendLine($"<b>Date:</b> {emailMessage.ReceivedDateTime:yyyy-MM-dd HH:mm:ss} UTC");
-        if (emailMessage.Labels.Any()) text.AppendLine($"<b>Labels:</b> {string.Join(" ", emailMessage.Labels.Select(l => $"#{EscapeHtml(l.Replace(" ", "_"))}"))}");
+        
+        // Header with subject using blockquote for emphasis
+        text.AppendLine($"<blockquote>📧 <b>{EscapeHtml(emailMessage.Subject)}</b></blockquote>");
         text.AppendLine();
-
-        // Content - strip HTML and truncate if needed
+        
+        // Sender and date information with better spacing
+        text.AppendLine($"<b>👤 From:</b> <code>{EscapeHtml(emailMessage.Sender)}</code>");
+        text.AppendLine($"<b>📅 Date:</b> <code>{emailMessage.ReceivedDateTime:yyyy-MM-dd HH:mm:ss} UTC</code>");
+        
+        // Labels with improved formatting
+        if (emailMessage.Labels.Any()) 
+        {
+            text.AppendLine();
+            text.AppendLine("<b>🏷️ Labels:</b>");
+            var labelChunks = emailMessage.Labels.Select(l => $"<code>#{EscapeHtml(l.Replace(" ", "_"))}</code>").ToList();
+            
+            // Display labels in rows of 3 with better spacing
+            for (int i = 0; i < labelChunks.Count; i += 3)
+            {
+                var chunk = labelChunks.Skip(i).Take(3);
+                text.AppendLine($"  {string.Join(" ", chunk)}");
+            }
+        }
+        
+        // Content section with clear separation
+        text.AppendLine();
+        text.AppendLine("<b>📄 Content:</b>");
+        text.AppendLine("<pre>═══════════════════════════════</pre>");
+        
+        // Content processing with better paragraph handling
         var content = StripHtmlTags(emailMessage.Content);
-        if (content.Length > 2500) content = content[..2500] + "...";
-        text.AppendLine(EscapeHtml(content));
+        if (content.Length > 2000) content = content[..2000] + "...";
+        
+        // Split content into paragraphs and format them
+        var paragraphs = content.Split(new[] { "\n\n", "\r\n\r\n" }, StringSplitOptions.RemoveEmptyEntries);
+        var displayedParagraphs = 0;
+        
+        foreach (var paragraph in paragraphs.Take(3))
+        {
+            var cleanParagraph = paragraph.Trim();
+            if (!string.IsNullOrEmpty(cleanParagraph))
+            {
+                displayedParagraphs++;
+                text.AppendLine();
+                
+                // Use different formatting for first paragraph (more emphasis)
+                if (displayedParagraphs == 1)
+                {
+                    text.AppendLine($"<blockquote>{EscapeHtml(cleanParagraph)}</blockquote>");
+                }
+                else
+                {
+                    text.AppendLine(EscapeHtml(cleanParagraph));
+                }
+            }
+        }
+        
+        if (paragraphs.Length > 3)
+        {
+            text.AppendLine();
+            text.AppendLine("<i>📖 Content continues...</i>");
+        }
 
+        // Attachments section
         if (emailMessage.Attachments.Any())
         {
             text.AppendLine();
+            text.AppendLine("<pre>═══════════════════════════════</pre>");
             text.AppendLine("<b>📎 Attachments:</b>");
             foreach (var attachment in emailMessage.Attachments)
-                text.AppendLine($"• {EscapeHtml(attachment.Filename)} ({FormatFileSize(attachment.Size)})");
+            {
+                text.AppendLine($"  <code>📁 {EscapeHtml(attachment.Filename)}</code> <i>({FormatFileSize(attachment.Size)})</i>");
+            }
         }
+        
+        // Footer with Gmail link and read status
         text.AppendLine();
-        text.AppendLine($"<a href=\"{emailMessage.DirectLink}\">📬 Open in Gmail</a>");
+        text.AppendLine("<pre>═══════════════════════════════</pre>");
+        
+        // Show read status
+        var readStatus = emailMessage.IsRead ? "✅ Read" : "🔵 Unread";
+        text.AppendLine($"<b>Status:</b> <i>{readStatus}</i>");
+        
+        text.AppendLine($"<b>📬 <a href=\"{emailMessage.DirectLink}\">Open in Gmail</a></b>");
+        
         return text.ToString();
     }
 
     private string BuildShortMessageText(EmailMessage emailMessage)
     {
         var text = new System.Text.StringBuilder();
-        text.AppendLine($"<b>📧 {EscapeHtml(emailMessage.Subject)}</b>");
+        
+        // Header with subject using blockquote for emphasis
+        text.AppendLine($"<blockquote>📧 <b>{EscapeHtml(emailMessage.Subject)}</b></blockquote>");
         text.AppendLine();
-        text.AppendLine($"<b>From:</b> {EscapeHtml(emailMessage.Sender)}");
-        text.AppendLine($"<b>Date:</b> {emailMessage.ReceivedDateTime:yyyy-MM-dd HH:mm:ss} UTC");
+        
+        // Sender and date information
+        text.AppendLine($"<b>👤 From:</b> <code>{EscapeHtml(emailMessage.Sender)}</code>");
+        text.AppendLine($"<b>📅 Date:</b> <code>{emailMessage.ReceivedDateTime:yyyy-MM-dd HH:mm:ss} UTC</code>");
+        
+        // Labels if present
+        if (emailMessage.Labels.Any()) 
+        {
+            text.AppendLine();
+            text.AppendLine("<b>🏷️ Labels:</b>");
+            var labelChunks = emailMessage.Labels.Select(l => $"<code>#{EscapeHtml(l.Replace(" ", "_"))}</code>").ToList();
+            
+            // Display labels in rows of 3
+            for (int i = 0; i < labelChunks.Count; i += 3)
+            {
+                var chunk = labelChunks.Skip(i).Take(3);
+                text.AppendLine($"  {string.Join(" ", chunk)}");
+            }
+        }
+        
+        // Message too long notice with better formatting
         text.AppendLine();
-        text.AppendLine("<i>(Message too long for Telegram)</i>");
+        text.AppendLine("<pre>═══════════════════════════════</pre>");
+        text.AppendLine("<blockquote><b>⚠️ Message Too Long</b></blockquote>");
+        text.AppendLine("<i>This email is too large to display in Telegram.</i>");
+        text.AppendLine("Please use the link below to read the full content.");
+        
+        // Show read status
         text.AppendLine();
-        text.AppendLine($"<a href=\"{emailMessage.DirectLink}\">📬 Open in Gmail to read full message</a>");
+        var readStatus = emailMessage.IsRead ? "✅ Read" : "🔵 Unread";
+        text.AppendLine($"<b>Status:</b> <i>{readStatus}</i>");
+        
+        text.AppendLine();
+        text.AppendLine("<pre>═══════════════════════════════</pre>");
+        text.AppendLine($"<b>📬 <a href=\"{emailMessage.DirectLink}\">Open in Gmail to read full message</a></b>");
+        
         return text.ToString();
     }
 
@@ -689,14 +814,22 @@ public class TelegramBotService
         html = System.Text.RegularExpressions.Regex.Replace(html, "<(script|style|head)[^>]*>.*?</\\1>", "",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline);
 
-        // Remove all HTML tags
+        // Convert some HTML tags to line breaks for better formatting
+        html = System.Text.RegularExpressions.Regex.Replace(html, "<(br|BR)\\s*/?\\s*>", "\n", 
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        html = System.Text.RegularExpressions.Regex.Replace(html, "</(p|div|h[1-6]|li)\\s*>", "\n\n", 
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        // Remove all other HTML tags
         html = System.Text.RegularExpressions.Regex.Replace(html, "<[^>]+>", " ");
 
         // Decode HTML entities
         html = System.Net.WebUtility.HtmlDecode(html);
 
-        // Clean up whitespace
-        html = System.Text.RegularExpressions.Regex.Replace(html, @"\s+", " ");
+        // Clean up excessive whitespace while preserving paragraph breaks
+        html = System.Text.RegularExpressions.Regex.Replace(html, @"[ \t]+", " ");
+        html = System.Text.RegularExpressions.Regex.Replace(html, @"\n[ \t]*\n", "\n\n");
+        html = System.Text.RegularExpressions.Regex.Replace(html, @"\n{3,}", "\n\n");
         html = html.Trim();
 
         return html;

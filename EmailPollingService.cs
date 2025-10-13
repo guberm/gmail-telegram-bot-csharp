@@ -12,6 +12,7 @@ public class EmailPollingService
     private readonly DatabaseService _databaseService;
     private readonly AppSettings _settings;
     private readonly HashSet<string> _processedMessageIds = new();
+    private readonly HashSet<long> _failedAuthenticationChats = new();
 
     /// <summary>
     /// Initializes a new instance of the EmailPollingService.
@@ -59,15 +60,35 @@ public class EmailPollingService
         Console.WriteLine("Email polling stopped");
     }
 
+    /// <summary>
+    /// Clears the failed authentication status for a user, allowing polling to resume.
+    /// </summary>
+    /// <param name="chatId">The chat ID of the user whose authentication status should be cleared.</param>
+    public void ClearAuthenticationFailure(long chatId)
+    {
+        if (_failedAuthenticationChats.Remove(chatId))
+        {
+            Console.WriteLine($"[DEBUG] Cleared authentication failure status for chat {chatId}");
+        }
+    }
+
     private async Task PollEmailsAsync(long chatId, CancellationToken cancellationToken)
     {
         Console.WriteLine($"[DEBUG] Starting PollEmailsAsync for chat {chatId}");
+        
+        // Skip polling if authentication has previously failed
+        if (_failedAuthenticationChats.Contains(chatId))
+        {
+            Console.WriteLine($"[DEBUG] Skipping polling for chat {chatId} due to previous authentication failure");
+            return;
+        }
         
         // Authenticate Gmail client for this user
         var credentials = _databaseService.GetUserCredentials(chatId);
         if (credentials == null)
         {
             Console.WriteLine($"[DEBUG] No credentials found for chat {chatId}");
+            _failedAuthenticationChats.Add(chatId);
             return;
         }
         
@@ -75,11 +96,41 @@ public class EmailPollingService
         if (!authSuccess)
         {
             Console.WriteLine($"[DEBUG] Failed to authenticate Gmail client for chat {chatId}");
+            
+            // Clean up the expired credentials
+            _databaseService.CleanupExpiredCredentials(chatId);
+            
+            // Mark this chat as having failed authentication to prevent repeated attempts
+            _failedAuthenticationChats.Add(chatId);
+            
+            // Try to notify the user about authentication failure
+            try
+            {
+                await _telegramService.SendTextNotificationAsync(
+                    "🔐 <b>Re-authentication Required</b>\n\n" +
+                    $"Your Gmail access for <code>{credentials.EmailAddress}</code> has expired and needs to be renewed.\n\n" +
+                    "📋 <b>To restore email notifications:</b>\n" +
+                    "1️⃣ Send <code>/start</code> to this bot\n" +
+                    "2️⃣ Click the authentication link\n" +
+                    "3️⃣ Sign in to your Gmail account\n" +
+                    "4️⃣ Grant permissions\n\n" +
+                    "ℹ️ <i>This happens periodically for security - your data remains safe.</i>",
+                    chatId, 
+                    CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[DEBUG] Failed to send authentication failure notification: {ex.Message}");
+            }
+            
             return;
         }
         
         _gmailService.SetCurrentUser(chatId);
         Console.WriteLine($"[DEBUG] Gmail client authenticated for user {credentials.EmailAddress}");
+        
+        // Clear any previous authentication failure status
+        _failedAuthenticationChats.Remove(chatId);
 
         // First: Check for email synchronization (deleted emails)
         await SynchronizeDeletedEmailsAsync(chatId, cancellationToken);
