@@ -25,9 +25,11 @@ public partial class DatabaseService : IDisposable
     {
         var createMessagesTable = @"CREATE TABLE IF NOT EXISTS messages (message_id TEXT PRIMARY KEY, subject TEXT, sender TEXT, received_datetime DATETIME, content TEXT, attachments TEXT, labels TEXT, direct_link TEXT, is_read INTEGER, telegram_message_id TEXT)";
         var createActionsTable = @"CREATE TABLE IF NOT EXISTS actions (id INTEGER PRIMARY KEY AUTOINCREMENT, message_id TEXT, action_type TEXT, action_timestamp DATETIME, user_id TEXT, new_label_values TEXT, FOREIGN KEY (message_id) REFERENCES messages(message_id))";
+        var createPreferencesTable = @"CREATE TABLE IF NOT EXISTS user_preferences (chat_id INTEGER PRIMARY KEY, show_unread_only INTEGER DEFAULT 0, updated_at DATETIME)";
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = createMessagesTable; cmd.ExecuteNonQuery();
         cmd.CommandText = createActionsTable; cmd.ExecuteNonQuery();
+        cmd.CommandText = createPreferencesTable; cmd.ExecuteNonQuery();
         
         // Initialize OAuth tables
         InitializeOAuthTables();
@@ -198,6 +200,47 @@ public partial class DatabaseService : IDisposable
             Console.WriteLine($"Error deleting message {messageId}: {ex.Message}");
             return false;
         }
+    }
+    
+    /// <summary>
+    /// Gets the user preference for a specific chat.
+    /// </summary>
+    /// <param name="chatId">The chat identifier.</param>
+    /// <returns>The user preference or a default instance if not found.</returns>
+    public UserPreference GetUserPreference(long chatId)
+    {
+        var sql = "SELECT chat_id, show_unread_only, updated_at FROM user_preferences WHERE chat_id = @chat_id";
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = sql;
+        cmd.Parameters.AddWithValue("@chat_id", chatId);
+        using var reader = cmd.ExecuteReader();
+        if (reader.Read())
+        {
+            return new UserPreference
+            {
+                ChatId = reader.GetInt64(0),
+                ShowUnreadOnly = reader.GetInt32(1) == 1,
+                UpdatedAt = DateTime.Parse(reader.GetString(2))
+            };
+        }
+        return new UserPreference { ChatId = chatId, ShowUnreadOnly = false };
+    }
+    
+    /// <summary>
+    /// Sets the user preference for showing unread messages only.
+    /// </summary>
+    /// <param name="chatId">The chat identifier.</param>
+    /// <param name="showUnreadOnly">Whether to show only unread messages.</param>
+    public void SetUserPreference(long chatId, bool showUnreadOnly)
+    {
+        var sql = @"INSERT OR REPLACE INTO user_preferences (chat_id, show_unread_only, updated_at) 
+                    VALUES (@chat_id, @show_unread_only, @updated_at)";
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = sql;
+        cmd.Parameters.AddWithValue("@chat_id", chatId);
+        cmd.Parameters.AddWithValue("@show_unread_only", showUnreadOnly ? 1 : 0);
+        cmd.Parameters.AddWithValue("@updated_at", DateTime.UtcNow.ToString("o"));
+        cmd.ExecuteNonQuery();
     }
     
     /// <summary>

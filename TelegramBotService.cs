@@ -89,6 +89,9 @@ public class TelegramBotService
             case "/emails":
                 await HandleEmailsCommand(messageText, cancellationToken);
                 break;
+            case "/filter":
+                await HandleFilterCommand(cancellationToken);
+                break;
             case "/test_sync":
                 await HandleTestSyncCommand(messageText ?? string.Empty, cancellationToken);
                 break;
@@ -223,6 +226,7 @@ public class TelegramBotService
             /start - Connect your Gmail account via OAuth
             /status - Check your Gmail connection status
             /emails [count] - Fetch recent emails (default: 5, max: 20)
+            /filter - Toggle between all emails or unread only
             /disconnect - Revoke access and delete credentials
             /test_sync <message_id> - Test sync status for specific message
             /cleanup_sync - Clean up orphaned database entries
@@ -262,6 +266,22 @@ public class TelegramBotService
             cancellationToken: cancellationToken);
     }
 
+    private async Task HandleFilterCommand(CancellationToken cancellationToken)
+    {
+        var preference = _databaseService.GetUserPreference(_chatId);
+        var newState = !preference.ShowUnreadOnly;
+        _databaseService.SetUserPreference(_chatId, newState);
+        
+        var filterStatus = newState ? "📬 Unread Only" : "📧 All Messages";
+        var message = $"✅ Filter updated!\n\n" +
+                     $"Current filter: {filterStatus}\n\n" +
+                     $"Use /emails to fetch emails with the new filter, or use the 🔄 Filter button on email messages.";
+        
+        await _botClient.SendMessage(_chatId,
+            message,
+            cancellationToken: cancellationToken);
+    }
+
     private async Task HandleEmailsCommand(string? messageText, CancellationToken cancellationToken)
     {
         // Check if user is authenticated
@@ -287,17 +307,24 @@ public class TelegramBotService
 
         try
         {
+            // Get user filter preference
+            var preference = _databaseService.GetUserPreference(_chatId);
+            var filterText = preference.ShowUnreadOnly ? " unread" : "";
+            
             await _botClient.SendMessage(_chatId,
-                $"🔍 Fetching your last {count} email(s)...",
+                $"🔍 Fetching your last {count}{filterText} email(s)...",
                 cancellationToken: cancellationToken);
 
-            // Fetch recent emails from Gmail
-            var emails = await _gmailService.GetRecentEmailsAsync(count);
+            // Fetch recent emails from Gmail with filter
+            var emails = await _gmailService.GetRecentEmailsAsync(count, preference.ShowUnreadOnly);
 
             if (emails == null || !emails.Any())
             {
+                var noEmailsMsg = preference.ShowUnreadOnly 
+                    ? "📭 No unread emails found in your inbox." 
+                    : "📭 No emails found in your inbox.";
                 await _botClient.SendMessage(_chatId,
-                    "📭 No emails found in your inbox.",
+                    noEmailsMsg,
                     cancellationToken: cancellationToken);
                 return;
             }
@@ -310,7 +337,7 @@ public class TelegramBotService
             }
 
             await _botClient.SendMessage(_chatId,
-                $"✅ Sent {emails.Count} email(s).",
+                $"✅ Sent {emails.Count}{filterText} email(s).",
                 cancellationToken: cancellationToken);
         }
         catch (Exception ex)
@@ -479,6 +506,46 @@ public class TelegramBotService
     private async Task HandleCallbackQueryAsync(CallbackQuery callbackQuery, CancellationToken cancellationToken)
     {
         if (callbackQuery.Data == null || callbackQuery.Message == null) return;
+
+        // Handle filter toggle
+        if (callbackQuery.Data == "toggle_filter")
+        {
+            var preference = _databaseService.GetUserPreference(callbackQuery.From.Id);
+            var newState = !preference.ShowUnreadOnly;
+            _databaseService.SetUserPreference(callbackQuery.From.Id, newState);
+            
+            var filterStatus = newState ? "📬 Unread Only" : "📧 All Messages";
+            await _botClient.AnswerCallbackQuery(
+                callbackQuery.Id, 
+                $"Filter updated: {filterStatus}", 
+                showAlert: true,
+                cancellationToken: cancellationToken);
+            
+            // Update the button to reflect the new state
+            if (callbackQuery.Message.ReplyMarkup?.InlineKeyboard != null)
+            {
+                var firstRow = callbackQuery.Message.ReplyMarkup.InlineKeyboard.FirstOrDefault();
+                if (firstRow != null && firstRow.Count() >= 1)
+                {
+                    var actionButton = firstRow.First();
+                    if (actionButton.CallbackData?.StartsWith("show_actions|") == true)
+                    {
+                        var emailMessageId = actionButton.CallbackData.Split('|')[1];
+                        var emailMessage = _databaseService.GetMessage(emailMessageId);
+                        if (emailMessage != null)
+                        {
+                            var updatedKeyboard = BuildInlineKeyboard(emailMessage);
+                            await _botClient.EditMessageReplyMarkup(
+                                callbackQuery.Message.Chat.Id,
+                                callbackQuery.Message.MessageId,
+                                replyMarkup: updatedKeyboard,
+                                cancellationToken: cancellationToken);
+                        }
+                    }
+                }
+            }
+            return;
+        }
 
         // Handle disconnect confirmation
         if (callbackQuery.Data == "disconnect_confirm")
@@ -936,11 +1003,19 @@ public class TelegramBotService
 
     private InlineKeyboardMarkup BuildInlineKeyboard(EmailMessage emailMessage)
     {
+        // Get current filter preference
+        var preference = _databaseService.GetUserPreference(_chatId);
+        var filterIcon = preference.ShowUnreadOnly ? "📬" : "📧";
+        var filterText = preference.ShowUnreadOnly ? "Unread" : "All";
+        
         var buttons = new List<List<InlineKeyboardButton>>
         {
             new() {
                 InlineKeyboardButton.WithCallbackData("⚡ Actions", $"show_actions|{emailMessage.MessageId}"),
                 InlineKeyboardButton.WithCallbackData("⭐ Star", $"star|{emailMessage.MessageId}")
+            },
+            new() {
+                InlineKeyboardButton.WithCallbackData($"🔄 Filter: {filterIcon} {filterText}", "toggle_filter")
             }
         };
         return new InlineKeyboardMarkup(buttons);

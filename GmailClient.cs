@@ -143,8 +143,9 @@ public class GmailClient
     /// Fetches email messages from the Gmail inbox with the specified limit.
     /// </summary>
     /// <param name="maxResults">The maximum number of messages to retrieve (default: 10).</param>
+    /// <param name="unreadOnly">If true, only fetch unread messages (default: false).</param>
     /// <returns>A list of EmailMessage objects ordered by received date (newest first).</returns>
-    public async Task<List<EmailMessage>> FetchInboxMessagesAsync(int maxResults = 10)
+    public async Task<List<EmailMessage>> FetchInboxMessagesAsync(int maxResults = 10, bool unreadOnly = false)
     {
         if (_service == null) throw new InvalidOperationException("Gmail service not authenticated");
         var messages = new List<EmailMessage>();
@@ -152,6 +153,10 @@ public class GmailClient
         {
             var request = _service.Users.Messages.List("me");
             request.LabelIds = new Google.Apis.Util.Repeatable<string>(new[] { "INBOX" });
+            if (unreadOnly)
+            {
+                request.Q = "is:unread";
+            }
             request.MaxResults = maxResults;
             var response = await request.ExecuteAsync();
             if (response.Messages != null)
@@ -371,8 +376,9 @@ public class GmailClient
     /// Gets the most recent email messages from the inbox.
     /// </summary>
     /// <param name="count">The number of recent emails to retrieve (default: 5).</param>
+    /// <param name="unreadOnly">If true, only fetch unread messages (default: false).</param>
     /// <returns>A list of the most recent EmailMessage objects.</returns>
-    public async Task<List<EmailMessage>> GetRecentEmailsAsync(int count = 5) => await FetchInboxMessagesAsync(count);
+    public async Task<List<EmailMessage>> GetRecentEmailsAsync(int count = 5, bool unreadOnly = false) => await FetchInboxMessagesAsync(count, unreadOnly);
 
     /// <summary>
     /// Checks whether a Gmail message is still present in the inbox.

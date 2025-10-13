@@ -11,6 +11,7 @@ A .NET 8 console application that integrates Gmail with Telegram using **OAuth 2
 - 🔐 **OAuth 2.0 Authentication** - Per-user Gmail authentication via web flow
 - 📨 **Email Forwarding** - Automatically forwards new inbox messages to Telegram
 - 🎛️ **Interactive Buttons** - Delete, Archive, Star, and Forward actions
+- 🔄 **Smart Filtering** - Toggle between all emails or unread only with one click
 - 🏷️ **Label Management** - View and modify Gmail labels
 - 💾 **SQLite Persistence** - Stores messages, actions, and user credentials
 - 🔄 **Automatic Token Refresh** - Handles expired access tokens seamlessly
@@ -109,25 +110,53 @@ The bot will:
 |---------|-------------|
 | `/start` | Connect your Gmail account via OAuth authentication |
 | `/status` | Check your Gmail connection status and details |
+| `/emails [count]` | Fetch recent emails (default: 5, max: 20) |
+| `/filter` | Toggle between showing all emails or unread only |
 | `/disconnect` | Revoke access and delete stored credentials |
 | `/help` | Show available commands and detailed usage guide |
 
 ### Email Actions
 
-Each forwarded email includes inline buttons:
+Each forwarded email includes inline buttons organized in a hierarchical menu:
 
-- 🗑️ **Delete** - Move email to trash
-- 📦 **Archive** - Remove from inbox (keep in All Mail)
+**Main Menu:**
+- ⚡ **Actions** - Opens submenu with email management options
 - ⭐ **Star** - Add star to email
+- � **Filter** - Toggle between "All Messages" or "Unread Only" mode
+
+**Actions Submenu:**
+- �🗑️ **Delete** - Move email to trash
+- 📦 **Archive** - Remove from inbox (keep in All Mail)
 - ➡️ **Forward** - Forward email to another address (coming soon)
+- ✉️ **Mark as Read** - Mark email as read in Gmail
+- ⬅️ **Back** - Return to main menu
+
+### Email Filtering
+
+The bot supports filtering emails to show only what you need:
+
+- **All Messages** (📧) - Show all inbox emails
+- **Unread Only** (📬) - Show only unread emails
+
+**How to use:**
+1. Click the `🔄 Filter` button on any email message
+2. Or use the `/filter` command to toggle
+3. Your preference is saved and applies to all `/emails` commands
+
+When filter is set to "Unread Only":
+- `/emails` fetches only unread messages
+- The filter button shows: `🔄 Filter: 📬 Unread`
+- Status messages indicate "unread" mode
+
+See [FILTER_FEATURE.md](FILTER_FEATURE.md) for detailed documentation.
 
 ## 🏗️ Architecture
 
 ```
-┌─────────┐     OAuth Link      ┌──────────┐
-│ Telegram  │◄──────────────────►│ Google OAuth │
-│   Bot     │                    │   Server    │
-└─────────┘                      └──────────┘
+┌───────────┐     OAuth Link      ┌──────────────┐
+│ Telegram  │◄───────────────────►│ Google OAuth │
+│   Bot     │                     │   Server     │
+└───────────┘                     └──────────────┘
        │                                   │
        │ Token Callback                    │ Auth Code
        │◄──────────────────────────────────┘
@@ -165,6 +194,12 @@ User action history
 id, message_id, action_type, action_timestamp, user_id, new_label_values
 ```
 
+#### `user_preferences`
+Per-user filter preferences
+```sql
+chat_id, show_unread_only, updated_at
+```
+
 ## 🔒 Security Features
 
 - 👤 **Per-user OAuth** - No shared credentials
@@ -177,6 +212,7 @@ id, message_id, action_type, action_timestamp, user_id, new_label_values
 ## 📚 Documentation
 
 - **[OAuth Setup Guide](OAUTH_SETUP.md)** - Detailed OAuth configuration and troubleshooting
+- **[Filter Feature Guide](FILTER_FEATURE.md)** - Email filtering functionality and usage
 - **[Contributing Guidelines](CONTRIBUTING.md)** - How to contribute to the project
 - **[License](LICENSE)** - MIT License terms
 
@@ -214,13 +250,16 @@ gmail-telegram-bot-csharp/
 
 ## 🗺️ Roadmap
 
+- [x] **Email Filtering** - Toggle between all emails and unread only ✅
+- [x] **Hierarchical Button Menu** - Organized action buttons with submenus ✅
 - [ ] **Complete Forward implementation** - Send emails to other addresses
 - [ ] **Multi-account support** - Multiple Gmail accounts per user
+- [ ] **Enhanced filtering** - Filter by label, date range, sender
 - [ ] **Enhanced label management** - Advanced label operations
 - [ ] **Attachment handling** - Download and send attachments via Telegram
 - [ ] **Search functionality** - Search emails via bot commands
 - [ ] **Email composition** - Send new emails from Telegram
-- [ ] **Filters & Rules** - Custom email filtering rules
+- [ ] **Custom Rules** - Advanced email filtering and automation rules
 - [ ] **Notification customization** - Per-user notification preferences
 - [ ] **Web dashboard** - Optional web interface for management
 

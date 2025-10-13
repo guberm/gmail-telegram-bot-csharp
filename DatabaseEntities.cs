@@ -51,3 +51,10 @@ public class ActionButton
     [JsonProperty("type")] public string Type { get; set; } = string.Empty;
     [JsonProperty("label")] public string Label { get; set; } = string.Empty;
 }
+
+public class UserPreference
+{
+    public long ChatId { get; set; }
+    public bool ShowUnreadOnly { get; set; } = false;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
