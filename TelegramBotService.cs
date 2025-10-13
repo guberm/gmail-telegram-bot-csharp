@@ -219,46 +219,38 @@ public class TelegramBotService
 
     private async Task HandleHelpCommand(CancellationToken cancellationToken)
     {
-        var helpText = """
-            📚 **Gmail Telegram Bot - Help**
-
-            **Available Commands:**
-            /start - Connect your Gmail account via OAuth
-            /status - Check your Gmail connection status
-            /emails [count] - Fetch recent emails (default: 5, max: 20)
-            /filter - Toggle between all emails or unread only
-            /disconnect - Revoke access and delete credentials
-            /test_sync <message_id> - Test sync status for specific message
-            /cleanup_sync - Clean up orphaned database entries
-            /help - Show this help message
-
-            **How it works:**
-            1️⃣ Use /start to connect your Gmail account
-            2️⃣ Authorize the bot in your browser
-            3️⃣ New emails will be forwarded here automatically
-            4️⃣ Use action buttons on each email to manage them
-            5️⃣ Emails deleted in Gmail will auto-sync to Telegram
-
-            **Email Actions:**
-            🗑️ Delete - Move email to trash
-            📦 Archive - Remove from inbox (keep in All Mail)  
-            ⭐ Star - Add star to email
-            ➡️ Forward - Forward email to another address
-
-            **Security:**
-            🔒 Your credentials are stored securely
-            🔑 OAuth tokens are encrypted in local database
-            🚫 No passwords are stored
-            ⏰ Tokens auto-refresh as needed
-            🛡️ You can revoke access anytime
-
-            **Email Synchronization:**
-            🔄 Auto-sync when emails are deleted in Gmail
-            🗑️ Telegram messages will be removed automatically
-            ⚡ Real-time synchronization during polling
-
-            **Need help?** Check the documentation or report issues on GitHub.
-            """;
+        var helpText = "📚 *Gmail Telegram Bot - Help*\n\n" +
+            "*Available Commands:*\n" +
+            "/start - Connect your Gmail account via OAuth\n" +
+            "/status - Check your Gmail connection status\n" +
+            "/emails \\[count\\] - Fetch recent emails (default: 5, max: 20)\n" +
+            "/filter - Toggle between all emails or unread only\n" +
+            "/disconnect - Revoke access and delete credentials\n" +
+            "/test\\_sync <message\\_id> - Test sync status for specific message\n" +
+            "/cleanup\\_sync - Clean up orphaned database entries\n" +
+            "/help - Show this help message\n\n" +
+            "*How it works:*\n" +
+            "1️⃣ Use /start to connect your Gmail account\n" +
+            "2️⃣ Authorize the bot in your browser\n" +
+            "3️⃣ New emails will be forwarded here automatically\n" +
+            "4️⃣ Use action buttons on each email to manage them\n" +
+            "5️⃣ Emails deleted in Gmail will auto-sync to Telegram\n\n" +
+            "*Email Actions:*\n" +
+            "🗑️ Delete - Move email to trash\n" +
+            "📦 Archive - Remove from inbox (keep in All Mail)\n" +
+            "⭐ Star - Add star to email\n" +
+            "➡️ Forward - Forward email to another address\n\n" +
+            "*Security:*\n" +
+            "🔒 Your credentials are stored securely\n" +
+            "🔑 OAuth tokens are encrypted in local database\n" +
+            "🚫 No passwords are stored\n" +
+            "⏰ Tokens auto-refresh as needed\n" +
+            "🛡️ You can revoke access anytime\n\n" +
+            "*Email Synchronization:*\n" +
+            "🔄 Auto-sync when emails are deleted in Gmail\n" +
+            "🗑️ Telegram messages will be removed automatically\n" +
+            "⚡ Real-time synchronization during polling\n\n" +
+            "*Need help?* Check the documentation or report issues on GitHub.";
 
         await _botClient.SendMessage(_chatId,
             helpText,
