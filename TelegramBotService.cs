@@ -656,17 +656,38 @@ public class TelegramBotService
         try
         {
             var minimalMessage = _messageFormatter.BuildMinimalMessage(emailMessage);
-            await _botClient.SendMessage(chatId, minimalMessage, parseMode: ParseMode.Html, cancellationToken: cancellationToken);
+            var sentMessage = await _botClient.SendMessage(chatId, minimalMessage, parseMode: ParseMode.Html, cancellationToken: cancellationToken);
+            
+            // Update the database with the Telegram message ID
+            emailMessage.TelegramMessageId = sentMessage.MessageId.ToString();
+            _databaseService.InsertOrUpdateMessage(emailMessage);
         }
         catch
         {
             // Last resort: plain text only
             try
             {
-                await _botClient.SendMessage(chatId, $"📧 New email from {emailMessage.Sender?.Split('<')[0]?.Trim() ?? "Unknown"} - check Gmail", cancellationToken: cancellationToken);
+                var sentMessage = await _botClient.SendMessage(chatId, $"📧 New email from {emailMessage.Sender?.Split('<')[0]?.Trim() ?? "Unknown"} - check Gmail", cancellationToken: cancellationToken);
+                
+                // Update the database with the Telegram message ID
+                emailMessage.TelegramMessageId = sentMessage.MessageId.ToString();
+                _databaseService.InsertOrUpdateMessage(emailMessage);
             }
             catch { }
         }
+    }
+
+    /// <summary>
+    /// Escapes HTML entities for safe display in Telegram HTML mode.
+    /// </summary>
+    /// <param name="text">The text to escape.</param>
+    /// <returns>HTML-escaped text safe for Telegram.</returns>
+    private static string EscapeHtml(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return string.Empty;
+        
+        return System.Web.HttpUtility.HtmlEncode(text);
     }
 
     private string BuildMessageText(EmailMessage emailMessage)
@@ -849,7 +870,7 @@ public class TelegramBotService
         return new InlineKeyboardMarkup(buttons);
     }
 
-    private string EscapeHtml(string text) => string.IsNullOrEmpty(text) ? string.Empty : text.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;");
+
     private string FormatFileSize(long bytes)
     {
         string[] sizes = { "B", "KB", "MB", "GB" }; double len = bytes; int order = 0; while (len >= 1024 && order < sizes.Length - 1) { order++; len /= 1024; }

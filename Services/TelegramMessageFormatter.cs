@@ -3,6 +3,7 @@ using Markdig;
 using TelegramGmailBot.Models;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Web;
 
 namespace TelegramGmailBot.Services;
 
@@ -22,6 +23,8 @@ public class TelegramMessageFormatter
             .UseAdvancedExtensions()
             .Build();
     }
+
+
 
     /// <summary>
     /// Builds a professionally formatted Telegram message from an email.
@@ -138,9 +141,8 @@ public class TelegramMessageFormatter
             cleanText = cleanText[..1800] + "...";
         }
 
-        // Convert to markdown for better formatting, then back to HTML for Telegram
-        var markdown = ConvertToMarkdown(cleanText);
-        return Markdown.ToHtml(markdown, _markdownPipeline);
+        // Return clean text directly - TelegramMessageBuilder will handle HTML formatting
+        return cleanText;
     }
 
     private string CleanHtmlContent(string html)
@@ -152,10 +154,28 @@ public class TelegramMessageFormatter
         html = Regex.Replace(html, @"<(script|style|head)[^>]*>.*?</\1>", "", 
             RegexOptions.IgnoreCase | RegexOptions.Singleline);
 
+        // Convert links to readable format: <a href="url">text</a> -> text: url
+        html = Regex.Replace(html, @"<a[^>]*href=[""']([^""']*)[""'][^>]*>(.*?)</a>", 
+            (match) => {
+                var url = match.Groups[1].Value;
+                var text = match.Groups[2].Value.Trim();
+                
+                // If link text is just the URL or very similar, show just the URL
+                if (string.IsNullOrEmpty(text) || text == url || text.Contains(url.Replace("https://", "").Replace("http://", "")))
+                    return url;
+                
+                // Otherwise show: text - url
+                return $"{text}: {url}";
+            }, RegexOptions.IgnoreCase);
+
         // Convert common HTML elements to text equivalents
         html = Regex.Replace(html, @"<br\s*/?>\s*", "\n", RegexOptions.IgnoreCase);
         html = Regex.Replace(html, @"</(p|div|h[1-6]|li)\s*>", "\n\n", RegexOptions.IgnoreCase);
         html = Regex.Replace(html, @"<li[^>]*>", "• ", RegexOptions.IgnoreCase);
+        
+        // Convert headers to emphasize with line breaks
+        html = Regex.Replace(html, @"<h[1-6][^>]*>", "\n\n** ", RegexOptions.IgnoreCase);
+        html = Regex.Replace(html, @"</h[1-6]>", " **\n\n", RegexOptions.IgnoreCase);
 
         // Remove all other HTML tags
         html = Regex.Replace(html, @"<[^>]+>", " ");
@@ -171,28 +191,7 @@ public class TelegramMessageFormatter
         return html.Trim();
     }
 
-    private string ConvertToMarkdown(string text)
-    {
-        // Simple text to basic markdown conversion
-        var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        var markdown = new StringBuilder();
 
-        foreach (var line in lines)
-        {
-            var trimmedLine = line.Trim();
-            if (string.IsNullOrEmpty(trimmedLine))
-                continue;
-
-            // Detect URLs and make them links
-            var urlPattern = @"https?://[^\s]+";
-            trimmedLine = Regex.Replace(trimmedLine, urlPattern, "[$0]($0)");
-
-            markdown.AppendLine(trimmedLine);
-            markdown.AppendLine();
-        }
-
-        return markdown.ToString();
-    }
 
     private string GetSenderName(string sender)
     {
@@ -223,6 +222,19 @@ public class TelegramMessageBuilder
     }
 
     /// <summary>
+    /// Escapes HTML entities for safe display in Telegram HTML mode.
+    /// </summary>
+    /// <param name="text">The text to escape.</param>
+    /// <returns>HTML-escaped text safe for Telegram.</returns>
+    private static string EscapeHtml(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return string.Empty;
+
+        return HttpUtility.HtmlEncode(text);
+    }
+
+    /// <summary>
     /// Adds a section with a title and optional content to the message.
     /// </summary>
     /// <param name="title">The section title.</param>
@@ -235,19 +247,19 @@ public class TelegramMessageBuilder
 
         if (isHeader)
         {
-            _content.AppendLine($"<blockquote><b>{Tools.EscapeMarkdown(title)}</b>");
+            _content.AppendLine($"<blockquote><b>{EscapeHtml(title)}</b>");
             if (!string.IsNullOrEmpty(content))
             {
-                _content.AppendLine($"{Tools.EscapeMarkdown(content)}");
+                _content.AppendLine($"{EscapeHtml(content)}");
             }
             _content.AppendLine("</blockquote>");
         }
         else
         {
-            _content.AppendLine($"<b>{Tools.EscapeMarkdown(title)}</b>");
+            _content.AppendLine($"<b>{EscapeHtml(title)}</b>");
             if (!string.IsNullOrEmpty(content))
             {
-                _content.AppendLine(Tools.EscapeMarkdown(content));
+                _content.AppendLine(EscapeHtml(content));
             }
         }
 
@@ -266,10 +278,10 @@ public class TelegramMessageBuilder
             _content.AppendLine();
 
         var formattedValue = useCodeForValue 
-            ? $"<code>{Tools.EscapeMarkdown(value)}</code>"
-            : Tools.EscapeMarkdown(value);
+            ? $"<code>{EscapeHtml(value)}</code>"
+            : EscapeHtml(value);
 
-        _content.AppendLine($"<b>{Tools.EscapeMarkdown(label)}:</b> {formattedValue}");
+        _content.AppendLine($"<b>{EscapeHtml(label)}:</b> {formattedValue}");
         _hasContent = true;
     }
 
@@ -290,7 +302,7 @@ public class TelegramMessageBuilder
         for (int i = 0; i < labels.Count; i += 3)
         {
             var labelGroup = labels.Skip(i).Take(3)
-                .Select(l => $"<code>#{Tools.EscapeMarkdown(l.Replace(" ", "_"))}</code>");
+                .Select(l => $"<code>#{EscapeHtml(l.Replace(" ", "_"))}</code>");
             _content.AppendLine($"  {string.Join(" ", labelGroup)}");
         }
 
@@ -316,13 +328,17 @@ public class TelegramMessageBuilder
         var paragraphs = content.Split(new[] { "\n\n" }, StringSplitOptions.RemoveEmptyEntries);
         if (paragraphs.Length > 0)
         {
-            _content.AppendLine($"<blockquote>{Tools.EscapeMarkdown(paragraphs[0].Trim())}</blockquote>");
-            
-            // Additional paragraphs in regular format
-            for (int i = 1; i < Math.Min(paragraphs.Length, 3); i++)
+            // Use blockquote for the first paragraph to add visual emphasis
+            _content.AppendLine($"<blockquote>{EscapeHtml(paragraphs[0].Trim())}</blockquote>");
+
+            // Add remaining paragraphs with proper spacing
+            for (int i = 1; i < Math.Min(paragraphs.Length, 3); i++)  // Limit to 3 paragraphs
             {
-                _content.AppendLine();
-                _content.AppendLine(Tools.EscapeMarkdown(paragraphs[i].Trim()));
+                if (!string.IsNullOrWhiteSpace(paragraphs[i]))
+                {
+                    _content.AppendLine();
+                    _content.AppendLine(EscapeHtml(paragraphs[i].Trim()));
+                }
             }
 
             if (paragraphs.Length > 3)
@@ -352,7 +368,7 @@ public class TelegramMessageBuilder
         foreach (var attachment in attachments)
         {
             var size = FormatFileSize(attachment.Size);
-            _content.AppendLine($"  <code>📁 {Tools.EscapeMarkdown(attachment.Filename)}</code> <i>({size})</i>");
+            _content.AppendLine($"  <code>📁 {EscapeHtml(attachment.Filename)}</code> <i>({size})</i>");
         }
 
         _hasContent = true;
@@ -369,8 +385,8 @@ public class TelegramMessageBuilder
             _content.AppendLine();
 
         _content.AppendLine("<pre>═══════════════════════════════</pre>");
-        _content.AppendLine($"<blockquote><b>{Tools.EscapeMarkdown(title)}</b></blockquote>");
-        _content.AppendLine($"<i>{Tools.EscapeMarkdown(message)}</i>");
+        _content.AppendLine($"<blockquote><b>{EscapeHtml(title)}</b></blockquote>");
+        _content.AppendLine($"<i>{EscapeHtml(message)}</i>");
 
         _hasContent = true;
     }
@@ -386,7 +402,7 @@ public class TelegramMessageBuilder
             _content.AppendLine();
 
         _content.AppendLine("<pre>═══════════════════════════════</pre>");
-        _content.AppendLine($"<b>📬 <a href=\"{gmailLink}\">{Tools.EscapeMarkdown(linkText)}</a></b>");
+        _content.AppendLine($"<b>📬 <a href=\"{gmailLink}\">{EscapeHtml(linkText)}</a></b>");
 
         _hasContent = true;
     }
