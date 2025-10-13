@@ -720,7 +720,7 @@ public class TelegramBotService
         // Content section with clear separation
         text.AppendLine();
         text.AppendLine("<b>📄 Content:</b>");
-        text.AppendLine("<pre>═══════════════════════════════</pre>");
+        //text.AppendLine("<pre>══════════════</pre>");
         
         // Content processing with better paragraph handling
         var content = StripHtmlTags(emailMessage.Content);
@@ -760,7 +760,7 @@ public class TelegramBotService
         if (emailMessage.Attachments.Any())
         {
             text.AppendLine();
-            text.AppendLine("<pre>═══════════════════════════════</pre>");
+            //text.AppendLine("<pre>══════════════</pre>");
             text.AppendLine("<b>📎 Attachments:</b>");
             foreach (var attachment in emailMessage.Attachments)
             {
@@ -770,7 +770,7 @@ public class TelegramBotService
         
         // Footer with Gmail link and read status
         text.AppendLine();
-        text.AppendLine("<pre>═══════════════════════════════</pre>");
+        //text.AppendLine("<pre>══════════════</pre>");
         
         // Show read status
         var readStatus = emailMessage.IsRead ? "✅ Read" : "🔵 Unread";
@@ -810,7 +810,7 @@ public class TelegramBotService
         
         // Message too long notice with better formatting
         text.AppendLine();
-        text.AppendLine("<pre>═══════════════════════════════</pre>");
+        //text.AppendLine("<pre>══════════════</pre>");
         text.AppendLine("<blockquote><b>⚠️ Message Too Long</b></blockquote>");
         text.AppendLine("<i>This email is too large to display in Telegram.</i>");
         text.AppendLine("Please use the link below to read the full content.");
@@ -821,7 +821,7 @@ public class TelegramBotService
         text.AppendLine($"<b>Status:</b> <i>{readStatus}</i>");
         
         text.AppendLine();
-        text.AppendLine("<pre>═══════════════════════════════</pre>");
+        //text.AppendLine("<pre>══════════════</pre>");
         text.AppendLine($"<b>📬 <a href=\"{emailMessage.DirectLink}\">Open in Gmail to read full message</a></b>");
         
         return text.ToString();

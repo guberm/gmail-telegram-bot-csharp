@@ -321,7 +321,7 @@ public class TelegramMessageBuilder
             _content.AppendLine();
 
         _content.AppendLine("<b>📄 Content:</b>");
-        _content.AppendLine("<pre>═══════════════════════════════</pre>");
+        //_content.AppendLine("<pre>══════════════</pre>");
         _content.AppendLine();
         
         // First paragraph gets blockquote treatment for emphasis
@@ -362,7 +362,7 @@ public class TelegramMessageBuilder
         if (_hasContent)
             _content.AppendLine();
 
-        _content.AppendLine("<pre>═══════════════════════════════</pre>");
+        //_content.AppendLine("<pre>══════════════</pre>");
         _content.AppendLine("<b>📎 Attachments:</b>");
 
         foreach (var attachment in attachments)
@@ -384,7 +384,7 @@ public class TelegramMessageBuilder
         if (_hasContent)
             _content.AppendLine();
 
-        _content.AppendLine("<pre>═══════════════════════════════</pre>");
+        //_content.AppendLine("<pre>══════════════</pre>");
         _content.AppendLine($"<blockquote><b>{EscapeHtml(title)}</b></blockquote>");
         _content.AppendLine($"<i>{EscapeHtml(message)}</i>");
 
@@ -401,7 +401,7 @@ public class TelegramMessageBuilder
         if (_hasContent)
             _content.AppendLine();
 
-        _content.AppendLine("<pre>═══════════════════════════════</pre>");
+        //_content.AppendLine("<pre>══════════════</pre>");
         _content.AppendLine($"<b>📬 <a href=\"{gmailLink}\">{EscapeHtml(linkText)}</a></b>");
 
         _hasContent = true;
