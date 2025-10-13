@@ -143,10 +143,18 @@ The bot supports filtering emails to show only what you need:
 2. Or use the `/filter` command to toggle
 3. Your preference is saved and applies to all `/emails` commands
 
-When filter is set to "Unread Only":
+**When filter is set to "Unread Only":**
 - `/emails` fetches only unread messages
 - The filter button shows: `🔄 Filter: 📬 Unread`
-- Status messages indicate "unread" mode
+- **Auto-removal**: Emails automatically disappear from Telegram when marked as read (in bot, Gmail web, or mobile app)
+- Synchronization happens during next polling cycle (~60 seconds)
+
+**When filter is set to "All Messages":**
+- All inbox emails are shown
+- Marking emails as read does NOT remove them from Telegram
+- Emails stay until manually deleted or archived
+
+> ⚠️ **Important**: In "Unread Only" mode, marking an email as read will automatically remove it from your Telegram chat. This keeps your chat clean and focused on unread emails only.
 
 See [FILTER_FEATURE.md](FILTER_FEATURE.md) for detailed documentation.
 

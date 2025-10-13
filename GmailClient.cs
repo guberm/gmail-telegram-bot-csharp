@@ -213,7 +213,12 @@ public class GmailClient
         }
     }
 
-    private async Task<EmailMessage?> GetMessageDetailsAsync(string messageId)
+    /// <summary>
+    /// Gets the detailed information for a specific email message by its ID.
+    /// </summary>
+    /// <param name="messageId">The unique identifier of the email message.</param>
+    /// <returns>The EmailMessage object with full details, or null if not found.</returns>
+    public async Task<EmailMessage?> GetMessageDetailsAsync(string messageId)
     {
         if (_service == null) return null;
         try

@@ -135,14 +135,18 @@ public class EmailPollingService
         // First: Check for email synchronization (deleted emails)
         await SynchronizeDeletedEmailsAsync(chatId, cancellationToken);
         
+        // Get user's filter preference
+        var preference = _databaseService.GetUserPreference(chatId);
+        var filterText = preference.ShowUnreadOnly ? " unread" : "";
+        
         var retryCount = 0; const int maxRetries = 3;
         while (retryCount < maxRetries)
         {
             try
             {
-                Console.WriteLine($"[DEBUG] Fetching inbox messages... (Attempt {retryCount + 1}/{maxRetries})");
-                var messages = await _gmailService.FetchInboxMessagesAsync(10);
-                Console.WriteLine($"[DEBUG] Found {messages.Count} messages in inbox");
+                Console.WriteLine($"[DEBUG] Fetching{filterText} inbox messages... (Attempt {retryCount + 1}/{maxRetries})");
+                var messages = await _gmailService.FetchInboxMessagesAsync(10, preference.ShowUnreadOnly);
+                Console.WriteLine($"[DEBUG] Found {messages.Count}{filterText} messages in inbox");
                 
                 // Log each message found
                 for (int i = 0; i < messages.Count; i++)
@@ -222,6 +226,9 @@ public class EmailPollingService
             Console.WriteLine($"[SYNC] Starting email synchronization for chat {chatId}");
             // Using configuration flag: _settings.EnableSyncNotifications
             
+            // Get user's filter preference
+            var preference = _databaseService.GetUserPreference(chatId);
+            
             // Get all stored messages for this user from database
             var allStoredMessages = _databaseService.GetAllMessagesForUser(chatId);
             if (!allStoredMessages.Any())
@@ -237,6 +244,10 @@ public class EmailPollingService
                 .ToList();
 
             Console.WriteLine($"[SYNC] Found {allStoredMessages.Count} stored messages total, checking {recentStoredMessages.Count} recent messages in Gmail...");
+            if (preference.ShowUnreadOnly)
+            {
+                Console.WriteLine($"[SYNC] Filter is 'Unread Only' - will also check read status");
+            }
 
             var deletedCount = 0;
             Console.WriteLine($"[SYNC] Starting to check {recentStoredMessages.Count} messages...");
@@ -252,7 +263,20 @@ public class EmailPollingService
                     
                     Console.WriteLine($"[SYNC-DEBUG] Message {storedMessage.MessageId} still in INBOX: {stillInInbox}");
                     
-                    if (!stillInInbox)
+                    // If filter is "Unread Only", also check if message is still unread
+                    var shouldRemove = !stillInInbox;
+                    if (stillInInbox && preference.ShowUnreadOnly)
+                    {
+                        // Get current message details to check read status
+                        var currentMessage = await _gmailService.GetMessageDetailsAsync(storedMessage.MessageId);
+                        if (currentMessage != null && currentMessage.IsRead)
+                        {
+                            Console.WriteLine($"[SYNC-DEBUG] Message {storedMessage.MessageId} is now read, will remove from Telegram (filter is Unread Only)");
+                            shouldRemove = true;
+                        }
+                    }
+                    
+                    if (shouldRemove)
                     {
                         Console.WriteLine($"[SYNC] Message {storedMessage.MessageId} no longer in INBOX, deleting from Telegram...");
                         

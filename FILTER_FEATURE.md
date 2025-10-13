@@ -113,10 +113,56 @@ Updated methods to support filtering:
    ```
 3. Preference is now "Unread Only"
 
+### Example 3: Auto-removal of Read Emails (Unread Only Mode)
+1. User has filter set to "📬 Unread Only"
+2. User receives 3 unread emails in Telegram
+3. User marks one email as read (via button or in Gmail web/app)
+4. During next polling cycle (default: 60 seconds):
+   - Bot checks Gmail for unread status
+   - Detects that email is now marked as read
+   - **Automatically removes** the email from Telegram
+   - Email is deleted from local database
+5. Only the 2 remaining unread emails stay in Telegram
+
+**Note**: This auto-removal only happens when filter is set to "Unread Only". With "All Messages" filter, marking emails as read does NOT remove them from Telegram.
+
 ## Default Behavior
 - New users default to **All Messages** (show everything)
 - Filter preference is stored permanently until changed
 - Each user has their own independent filter preference
+
+## Important: Auto-Removal Behavior
+
+### When Filter is "Unread Only" (📬)
+- ✅ **New unread emails** are forwarded to Telegram
+- ✅ **Marking email as read** (in Telegram or Gmail) will **automatically remove it from Telegram**
+- ✅ Removal happens during next polling cycle (default: 60 seconds)
+- ✅ Email is deleted from both Telegram and local database
+- ⚡ **This keeps your Telegram clean** - only unread emails remain visible
+
+### When Filter is "All Messages" (📧)
+- ✅ **All inbox emails** are forwarded to Telegram
+- ✅ **Marking email as read** does NOT remove it from Telegram
+- ✅ Email stays in Telegram until manually deleted or archived
+- ⚡ **This gives you full history** - all emails remain visible regardless of read status
+
+### How Auto-Removal Works (Technical)
+1. **Email Polling Service** runs every 60 seconds (configurable)
+2. For each stored message in database:
+   - Checks if email is still in Gmail INBOX
+   - **If filter is "Unread Only"**: Also checks if email is still unread
+   - If email is read (and filter is "Unread Only"): Removes from Telegram + Database
+   - If email is deleted/archived in Gmail: Removes from Telegram + Database (regardless of filter)
+3. **Result**: Your Telegram chat automatically syncs with your filter preference
+
+### Where Can You Mark Emails as Read?
+Email will be auto-removed when marked as read from:
+- ✅ **Telegram bot** - Using the "Mark as Read" button
+- ✅ **Gmail web interface** - gmail.com
+- ✅ **Gmail mobile app** - iOS/Android
+- ✅ **Any email client** - Outlook, Apple Mail, Thunderbird, etc.
+
+All methods work because the bot checks the actual Gmail read status during sync.
 
 ## Benefits
 1. **Reduce Noise**: Focus on unread emails only

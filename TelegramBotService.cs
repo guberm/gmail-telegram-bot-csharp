@@ -897,8 +897,8 @@ public class TelegramBotService
         
         if (paragraphs.Length > 3)
         {
-            text.AppendLine();
-            text.AppendLine("<i>📖 Content continues...</i>");
+            //text.AppendLine();
+            //text.AppendLine("<i>📖 Content continues...</i>");
         }
 
         // Attachments section

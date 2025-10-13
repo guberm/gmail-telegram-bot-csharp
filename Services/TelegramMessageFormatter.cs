@@ -343,8 +343,8 @@ public class TelegramMessageBuilder
 
             if (paragraphs.Length > 3)
             {
-                _content.AppendLine();
-                _content.AppendLine("<i>📖 Content continues...</i>");
+                //_content.AppendLine();
+                //_content.AppendLine("<i>📖 Content continues...</i>");
             }
         }
 
