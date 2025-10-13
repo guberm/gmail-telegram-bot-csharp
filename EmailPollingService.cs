@@ -2,6 +2,9 @@ using TelegramGmailBot.Models;
 
 namespace TelegramGmailBot.Services;
 
+/// <summary>
+/// Service responsible for continuously polling Gmail for new emails and forwarding them to Telegram.
+/// </summary>
 public class EmailPollingService
 {
     private readonly GmailClient _gmailService;
@@ -10,6 +13,13 @@ public class EmailPollingService
     private readonly AppSettings _settings;
     private readonly HashSet<string> _processedMessageIds = new();
 
+    /// <summary>
+    /// Initializes a new instance of the EmailPollingService.
+    /// </summary>
+    /// <param name="gmailService">The Gmail client service for accessing email data.</param>
+    /// <param name="telegramService">The Telegram bot service for sending notifications.</param>
+    /// <param name="databaseService">The database service for storing email information.</param>
+    /// <param name="settings">The application settings containing polling configuration.</param>
     public EmailPollingService(
         GmailClient gmailService,
         TelegramBotService telegramService,
@@ -22,6 +32,11 @@ public class EmailPollingService
         _settings = settings;
     }
 
+    /// <summary>
+    /// Starts the email polling process for a specific user, continuously checking for new emails and forwarding them to Telegram.
+    /// </summary>
+    /// <param name="chatId">The Telegram chat ID where emails should be forwarded.</param>
+    /// <param name="cancellationToken">The cancellation token to stop the polling process.</param>
     public async Task StartPollingAsync(long chatId, CancellationToken cancellationToken)
     {
         Console.WriteLine($"Starting email polling with interval: {_settings.PollingIntervalSeconds} seconds");

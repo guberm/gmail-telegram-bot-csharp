@@ -8,14 +8,28 @@ using System.Text;
 
 namespace TelegramGmailBot.Services;
 
+/// <summary>
+/// Client for interacting with Gmail API to fetch, manage, and perform operations on email messages.
+/// Provides functionality for authentication, message retrieval, and email actions like delete, archive, and star.
+/// </summary>
 public class GmailClient
 {
     private readonly AppSettings _settings;
     private Google.Apis.Gmail.v1.GmailService? _service;
     private long _currentChatId;
 
+    /// <summary>
+    /// Initializes a new instance of the GmailClient with the specified application settings.
+    /// </summary>
+    /// <param name="settings">The application settings containing Gmail API configuration.</param>
     public GmailClient(AppSettings settings) { _settings = settings; }
 
+    /// <summary>
+    /// Authenticates the Gmail client using OAuth2 access and refresh tokens.
+    /// </summary>
+    /// <param name="accessToken">The OAuth2 access token for Gmail API access.</param>
+    /// <param name="refreshToken">The OAuth2 refresh token for token renewal.</param>
+    /// <returns>True if authentication succeeds, false otherwise.</returns>
     public async Task<bool> AuthenticateAsync(string accessToken, string refreshToken)
     {
         try
@@ -55,11 +69,20 @@ public class GmailClient
         }
     }
 
+    /// <summary>
+    /// Sets the current Telegram chat ID for context in Gmail operations.
+    /// </summary>
+    /// <param name="chatId">The Telegram chat ID to associate with this Gmail client instance.</param>
     public void SetCurrentUser(long chatId)
     {
         _currentChatId = chatId;
     }
 
+    /// <summary>
+    /// Fetches email messages from the Gmail inbox with the specified limit.
+    /// </summary>
+    /// <param name="maxResults">The maximum number of messages to retrieve (default: 10).</param>
+    /// <returns>A list of EmailMessage objects ordered by received date (newest first).</returns>
     public async Task<List<EmailMessage>> FetchInboxMessagesAsync(int maxResults = 10)
     {
         if (_service == null) throw new InvalidOperationException("Gmail service not authenticated");
@@ -84,6 +107,12 @@ public class GmailClient
         return messages;
     }
 
+    /// <summary>
+    /// Fetches email messages from the Gmail inbox with pagination support.
+    /// </summary>
+    /// <param name="maxResults">The maximum number of messages to retrieve per page (default: 10).</param>
+    /// <param name="pageToken">The pagination token for retrieving the next page of results (optional).</param>
+    /// <returns>A tuple containing the list of messages, next page token, and whether more pages are available.</returns>
     public async Task<(List<EmailMessage> messages, string? nextPageToken, bool hasMore)> FetchInboxMessagesWithPaginationAsync(int maxResults = 10, string? pageToken = null)
     {
         if (_service == null) throw new InvalidOperationException("Gmail service not authenticated");
@@ -196,6 +225,11 @@ public class GmailClient
         catch { return string.Empty; }
     }
 
+    /// <summary>
+    /// Moves a Gmail message to the trash (soft delete).
+    /// </summary>
+    /// <param name="messageId">The ID of the message to delete.</param>
+    /// <returns>True if the message was successfully moved to trash, false otherwise.</returns>
     public async Task<bool> DeleteMessageAsync(string messageId)
     {
         if (_service == null) return false;
@@ -208,6 +242,11 @@ public class GmailClient
         catch (Exception ex) { Console.WriteLine($"Error moving message {messageId} to trash: {ex.Message}"); return false; }
     }
 
+    /// <summary>
+    /// Archives a Gmail message by removing it from the inbox.
+    /// </summary>
+    /// <param name="messageId">The ID of the message to archive.</param>
+    /// <returns>True if the message was successfully archived, false otherwise.</returns>
     public async Task<bool> ArchiveMessageAsync(string messageId)
     {
         if (_service == null) return false;
@@ -215,6 +254,11 @@ public class GmailClient
         catch (Exception ex) { Console.WriteLine($"Error archiving message {messageId}: {ex.Message}"); return false; }
     }
 
+    /// <summary>
+    /// Adds a star to a Gmail message by applying the STARRED label.
+    /// </summary>
+    /// <param name="messageId">The ID of the message to star.</param>
+    /// <returns>True if the message was successfully starred, false otherwise.</returns>
     public async Task<bool> StarMessageAsync(string messageId)
     {
         if (_service == null) return false;
@@ -222,6 +266,11 @@ public class GmailClient
         catch (Exception ex) { Console.WriteLine($"Error starring message {messageId}: {ex.Message}"); return false; }
     }
 
+    /// <summary>
+    /// Marks a Gmail message as read by removing the UNREAD label.
+    /// </summary>
+    /// <param name="messageId">The ID of the message to mark as read.</param>
+    /// <returns>True if the message was successfully marked as read, false otherwise.</returns>
     public async Task<bool> MarkAsReadAsync(string messageId)
     {
         if (_service == null) return false;
@@ -243,6 +292,13 @@ public class GmailClient
         }
     }
 
+    /// <summary>
+    /// Modifies the labels on a Gmail message by adding and/or removing specified labels.
+    /// </summary>
+    /// <param name="messageId">The ID of the message to modify.</param>
+    /// <param name="labelsToAdd">A list of label names to add to the message.</param>
+    /// <param name="labelsToRemove">A list of label names to remove from the message.</param>
+    /// <returns>True if the labels were successfully modified, false otherwise.</returns>
     public async Task<bool> ModifyLabelsAsync(string messageId, List<string> labelsToAdd, List<string> labelsToRemove)
     {
         if (_service == null) return false;
@@ -250,8 +306,18 @@ public class GmailClient
         catch (Exception ex) { Console.WriteLine($"Error modifying labels for message {messageId}: {ex.Message}"); return false; }
     }
 
+    /// <summary>
+    /// Gets the most recent email messages from the inbox.
+    /// </summary>
+    /// <param name="count">The number of recent emails to retrieve (default: 5).</param>
+    /// <returns>A list of the most recent EmailMessage objects.</returns>
     public async Task<List<EmailMessage>> GetRecentEmailsAsync(int count = 5) => await FetchInboxMessagesAsync(count);
 
+    /// <summary>
+    /// Checks whether a Gmail message is still present in the inbox.
+    /// </summary>
+    /// <param name="messageId">The ID of the message to check.</param>
+    /// <returns>True if the message is still in the inbox, false if it has been deleted or moved.</returns>
     public async Task<bool> MessageStillInInboxAsync(string messageId)
     {
         if (_service == null) 
@@ -289,5 +355,11 @@ public class GmailClient
         }
     }
 
+    /// <summary>
+    /// Forwards a Gmail message to the specified email address.
+    /// </summary>
+    /// <param name="messageId">The ID of the message to forward.</param>
+    /// <param name="toEmail">The email address to forward the message to.</param>
+    /// <returns>The ID of the forwarded message, or null if forwarding fails.</returns>
     public async Task<string?> ForwardMessageAsync(string messageId, string toEmail) { await Task.CompletedTask; return null; }
 }

@@ -4,9 +4,17 @@ using TelegramGmailBot.Models;
 
 namespace TelegramGmailBot.Services;
 
+/// <summary>
+/// Provides database operations for email messages, user actions, and OAuth-related data storage.
+/// </summary>
 public partial class DatabaseService : IDisposable
 {
     private readonly SqliteConnection _connection;
+    
+    /// <summary>
+    /// Initializes a new instance of the DatabaseService with the specified database path.
+    /// </summary>
+    /// <param name="databasePath">The path to the SQLite database file.</param>
     public DatabaseService(string databasePath)
     {
         _connection = new SqliteConnection($"Data Source={databasePath}");
@@ -25,6 +33,10 @@ public partial class DatabaseService : IDisposable
         InitializeOAuthTables();
     }
     
+    /// <summary>
+    /// Inserts a new email message or updates an existing one in the database.
+    /// </summary>
+    /// <param name="message">The email message to insert or update.</param>
     public void InsertOrUpdateMessage(EmailMessage message)
     {
         var sql = @"INSERT OR REPLACE INTO messages (message_id, subject, sender, received_datetime, content, attachments, labels, direct_link, is_read, telegram_message_id) VALUES (@message_id,@subject,@sender,@received_datetime,@content,@attachments,@labels,@direct_link,@is_read,@telegram_message_id)";
@@ -43,6 +55,11 @@ public partial class DatabaseService : IDisposable
         cmd.ExecuteNonQuery();
     }
     
+    /// <summary>
+    /// Retrieves an email message from the database by its message ID.
+    /// </summary>
+    /// <param name="messageId">The unique identifier of the email message.</param>
+    /// <returns>The email message if found, otherwise null.</returns>
     public EmailMessage? GetMessage(string messageId)
     {
         var sql = "SELECT * FROM messages WHERE message_id = @message_id";
@@ -68,6 +85,11 @@ public partial class DatabaseService : IDisposable
         return null;
     }
     
+    /// <summary>
+    /// Checks whether an email message exists in the database.
+    /// </summary>
+    /// <param name="messageId">The unique identifier of the email message.</param>
+    /// <returns>True if the message exists, otherwise false.</returns>
     public bool MessageExists(string messageId)
     {
         var sql = "SELECT COUNT(*) FROM messages WHERE message_id = @message_id";
@@ -76,6 +98,10 @@ public partial class DatabaseService : IDisposable
         var count = (long)(cmd.ExecuteScalar() ?? 0L); return count > 0;
     }
     
+    /// <summary>
+    /// Inserts a new message action record into the database.
+    /// </summary>
+    /// <param name="action">The message action to record.</param>
     public void InsertAction(MessageAction action)
     {
         var sql = @"INSERT INTO actions (message_id, action_type, action_timestamp, user_id, new_label_values) VALUES (@message_id,@action_type,@action_timestamp,@user_id,@new_label_values)";
@@ -89,6 +115,11 @@ public partial class DatabaseService : IDisposable
         cmd.ExecuteNonQuery();
     }
     
+    /// <summary>
+    /// Retrieves all actions performed on a specific email message.
+    /// </summary>
+    /// <param name="messageId">The unique identifier of the email message.</param>
+    /// <returns>A list of message actions ordered by timestamp in descending order.</returns>
     public List<MessageAction> GetActionsForMessage(string messageId)
     {
         var sql = "SELECT * FROM actions WHERE message_id = @message_id ORDER BY action_timestamp DESC";
@@ -111,6 +142,11 @@ public partial class DatabaseService : IDisposable
         return actions;
     }
 
+    /// <summary>
+    /// Retrieves all email messages associated with a specific user.
+    /// </summary>
+    /// <param name="chatId">The chat ID of the user.</param>
+    /// <returns>A list of email messages for the specified user.</returns>
     public List<EmailMessage> GetAllMessagesForUser(long chatId)
     {
         var sql = @"SELECT m.* FROM messages m 
@@ -142,6 +178,11 @@ public partial class DatabaseService : IDisposable
         return messages;
     }
 
+    /// <summary>
+    /// Deletes an email message from the database.
+    /// </summary>
+    /// <param name="messageId">The unique identifier of the email message to delete.</param>
+    /// <returns>True if the message was successfully deleted, otherwise false.</returns>
     public bool DeleteMessage(string messageId)
     {
         try
@@ -159,5 +200,8 @@ public partial class DatabaseService : IDisposable
         }
     }
     
+    /// <summary>
+    /// Releases all resources used by the DatabaseService.
+    /// </summary>
     public void Dispose() => _connection?.Dispose();
 }

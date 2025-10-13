@@ -4,6 +4,9 @@ using TelegramGmailBot.Models;
 
 namespace TelegramGmailBot.Services;
 
+/// <summary>
+/// Service for handling OAuth 2.0 authentication with Google for Gmail access.
+/// </summary>
 public class OAuthService
 {
     private readonly DatabaseService _databaseService;
@@ -12,13 +15,25 @@ public class OAuthService
     private const string GoogleAuthUrl = "https://accounts.google.com/o/oauth2/v2/auth";
     private const string GoogleTokenUrl = "https://oauth2.googleapis.com/token";
 
+    /// <summary>
+    /// Initializes a new instance of the OAuthService.
+    /// </summary>
+    /// <param name="databaseService">The database service for storing OAuth states and user credentials.</param>
+    /// <param name="settings">The application settings containing OAuth configuration.</param>
+    /// <exception cref="ArgumentNullException">Thrown if databaseService or settings is null.</exception>
     public OAuthService(DatabaseService databaseService, AppSettings settings)
     {
-        _databaseService = databaseService;
-        _settings = settings;
+        _databaseService = databaseService ?? throw new ArgumentNullException(nameof(databaseService));
+        _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _httpClient = new HttpClient();
     }
 
+    /// <summary>
+    /// Generates the Google OAuth authorization URL for a user to initiate the OAuth flow.
+    /// </summary>
+    /// <param name="chatId">The chat ID of the user.</param>
+    /// <param name="clientId">The Google OAuth client ID.</param>
+    /// <returns>The authorization URL.</returns>
     public string GenerateAuthorizationUrl(long chatId, string clientId)
     {
         var state = GenerateRandomState();
@@ -29,7 +44,7 @@ public class OAuthService
             CreatedAt = DateTime.UtcNow,
             ExpiresAt = DateTime.UtcNow.AddMinutes(10)
         };
-        
+
         _databaseService.SaveOAuthState(oauthState);
         _databaseService.CleanupExpiredOAuthStates();
 
@@ -46,6 +61,20 @@ public class OAuthService
         return url;
     }
 
+    /// <summary>
+    /// Exchanges an authorization code for user credentials.
+    /// </summary>
+    /// <param name="code">The authorization code received from Google.</param>
+    /// <param name="clientId">The Google OAuth client ID.</param>
+    /// <param name="clientSecret">The Google OAuth client secret.</param>
+    /// <param name="chatId">The chat ID of the user.</param>
+    /// <returns>The user credentials if successful, otherwise null.</returns>
+    /// <exception cref="ArgumentNullException">Thrown if code, clientId, or clientSecret is null or empty.</exception>
+    /// <exception cref="InvalidOperationException">Thrown if the OAuth state is invalid or expired.</exception>
+    /// <remarks>
+    /// This method exchanges the authorization code for access and refresh tokens,
+    /// and retrieves the user's email address.
+    /// </remarks>
     public async Task<UserCredentials?> ExchangeCodeForTokensAsync(string code, string clientId, string clientSecret, long chatId)
     {
         try
@@ -95,6 +124,18 @@ public class OAuthService
         }
     }
 
+    /// <summary>
+    /// Refreshes the user's access token using their refresh token.
+    /// </summary>
+    /// <param name="chatId">The chat ID of the user.</param>
+    /// <param name="clientId">The Google OAuth client ID.</param>
+    /// <param name="clientSecret">The Google OAuth client secret.</param>
+    /// <returns>True if the token was successfully refreshed, otherwise false.</returns>
+    /// <exception cref="ArgumentNullException">Thrown if clientId or clientSecret is null or empty.</exception>
+    /// <remarks>
+    /// This method retrieves the user's current credentials from the database,
+    /// refreshes the access token using the refresh token, and updates the database.
+    /// </remarks>
     public async Task<bool> RefreshAccessTokenAsync(long chatId, string clientId, string clientSecret)
     {
         try

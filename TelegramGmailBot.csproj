@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
@@ -13,10 +13,10 @@
     <None Remove="tests\**" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Google.Apis.Gmail.v1" Version="1.68.0.3427" />
-    <PackageReference Include="Google.Apis.Auth" Version="1.68.0" />
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.0" />
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
-    <PackageReference Include="Telegram.Bot" Version="19.0.0" />
+    <PackageReference Include="Google.Apis.Gmail.v1" Version="1.70.0.3833" />
+    <PackageReference Include="Google.Apis.Auth" Version="1.72.0" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.9" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+    <PackageReference Include="Telegram.Bot" Version="22.7.2" />
   </ItemGroup>
 </Project>

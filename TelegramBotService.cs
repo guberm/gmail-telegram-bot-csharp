@@ -2,11 +2,16 @@ using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.ReplyMarkups;
+using Telegram.Bot.Exceptions;
+using Telegram.Bot.Requests;
 using TelegramGmailBot.Models;
 using Newtonsoft.Json;
 
 namespace TelegramGmailBot.Services;
 
+/// <summary>
+/// Service for handling interactions with the Telegram Bot API.
+/// </summary>
 public class TelegramBotService
 {
     private readonly TelegramBotClient _botClient;
@@ -16,6 +21,14 @@ public class TelegramBotService
     private readonly AppSettings _settings;
     private long _chatId;
 
+    /// <summary>
+    /// Initializes a new instance of the TelegramBotService.
+    /// </summary>
+    /// <param name="botToken">The Telegram bot token.</param>
+    /// <param name="gmailService">The Gmail client service for accessing email data.</param>
+    /// <param name="databaseService">The database service for storing email information.</param>
+    /// <param name="oauthService">The OAuth service for handling OAuth operations.</param>
+    /// <param name="settings">The application settings containing bot configuration.</param>
     public TelegramBotService(string botToken, GmailClient gmailService, DatabaseService databaseService, OAuthService oauthService, AppSettings settings)
     {
         _botClient = new TelegramBotClient(botToken);
@@ -25,9 +38,13 @@ public class TelegramBotService
         _settings = settings;
     }
 
+    /// <summary>
+    /// Starts the Telegram bot service.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token to stop the service.</param>
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        var me = await _botClient.GetMeAsync(cancellationToken);
+        var me = await _botClient.GetMe(cancellationToken);
         Console.WriteLine($"Bot started: @{me.Username}");
         _botClient.StartReceiving(HandleUpdateAsync, HandleErrorAsync, cancellationToken: cancellationToken);
     }
@@ -36,14 +53,14 @@ public class TelegramBotService
     {
         try
         {
-            if (update.Type == UpdateType.Message && update.Message?.Text != null) 
+            if (update.Type == UpdateType.Message && update.Message?.Text != null)
                 await HandleMessageAsync(update.Message, cancellationToken);
-            else if (update.Type == UpdateType.CallbackQuery && update.CallbackQuery != null) 
+            else if (update.Type == UpdateType.CallbackQuery && update.CallbackQuery != null)
                 await HandleCallbackQueryAsync(update.CallbackQuery, cancellationToken);
         }
-        catch (Exception ex) 
-        { 
-            Console.WriteLine($"Error handling update: {ex.Message}"); 
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error handling update: {ex.Message}");
         }
     }
 
@@ -52,7 +69,7 @@ public class TelegramBotService
         _chatId = message.Chat.Id;
         var messageText = message.Text?.Trim();
         var command = messageText?.ToLower().Split(' ')[0];
-        
+
         switch (command)
         {
             case "/start":
@@ -71,14 +88,14 @@ public class TelegramBotService
                 await HandleEmailsCommand(messageText, cancellationToken);
                 break;
             case "/test_sync":
-                await HandleTestSyncCommand(messageText, cancellationToken);
+                await HandleTestSyncCommand(messageText ?? string.Empty, cancellationToken);
                 break;
             case "/cleanup_sync":
                 await HandleCleanupSyncCommand(cancellationToken);
                 break;
             default:
-                await _botClient.SendTextMessageAsync(_chatId, 
-                    "❓ Unknown command. Type /help to see available commands.", 
+                await _botClient.SendMessage(_chatId,
+                    "❓ Unknown command. Type /help to see available commands.",
                     cancellationToken: cancellationToken);
                 break;
         }
@@ -90,11 +107,11 @@ public class TelegramBotService
         if (_databaseService.HasUserCredentials(_chatId))
         {
             var credentials = _databaseService.GetUserCredentials(_chatId);
-            await _botClient.SendTextMessageAsync(_chatId, 
+            await _botClient.SendMessage(_chatId,
                 $"✅ You're already connected!\n\n" +
                 $"📧 Gmail account: {credentials?.EmailAddress ?? "Unknown"}\n" +
                 $"🕒 Connected since: {credentials?.CreatedAt:yyyy-MM-dd HH:mm} UTC\n\n" +
-                $"Your emails will be forwarded here automatically. Use /status to check connection details.", 
+                $"Your emails will be forwarded here automatically. Use /status to check connection details.",
                 cancellationToken: cancellationToken);
             return;
         }
@@ -102,7 +119,7 @@ public class TelegramBotService
         // Generate OAuth URL and send authentication link
         if (string.IsNullOrEmpty(_settings.GoogleClientId))
         {
-            await _botClient.SendTextMessageAsync(_chatId,
+            await _botClient.SendMessage(_chatId,
                 "❌ Bot configuration error: Google OAuth credentials not configured. Please contact the bot administrator.",
                 cancellationToken: cancellationToken);
             return;
@@ -114,7 +131,7 @@ public class TelegramBotService
             InlineKeyboardButton.WithUrl("🔐 Connect Gmail Account", authUrl)
         });
 
-        await _botClient.SendTextMessageAsync(_chatId,
+        await _botClient.SendMessage(_chatId,
             "👋 Welcome to Gmail Telegram Bot!\n\n" +
             "To get started, you need to connect your Gmail account. Click the button below to authorize access:\n\n" +
             "🔒 Your credentials are stored securely and only you can access them.\n" +
@@ -128,7 +145,7 @@ public class TelegramBotService
     {
         if (!_databaseService.HasUserCredentials(_chatId))
         {
-            await _botClient.SendTextMessageAsync(_chatId,
+            await _botClient.SendMessage(_chatId,
                 "❌ No Gmail account connected.\n\n" +
                 "Use /start to connect your Gmail account.",
                 cancellationToken: cancellationToken);
@@ -138,7 +155,7 @@ public class TelegramBotService
         var credentials = _databaseService.GetUserCredentials(_chatId);
         if (credentials == null)
         {
-            await _botClient.SendTextMessageAsync(_chatId,
+            await _botClient.SendMessage(_chatId,
                 "❌ Error retrieving your credentials. Please try /disconnect and then /start again.",
                 cancellationToken: cancellationToken);
             return;
@@ -146,8 +163,8 @@ public class TelegramBotService
 
         var isExpired = credentials.ExpiresAt <= DateTime.UtcNow;
         var status = isExpired ? "🟡 Token expired (will auto-refresh)" : "🟢 Active";
-        
-        await _botClient.SendTextMessageAsync(_chatId,
+
+        await _botClient.SendMessage(_chatId,
             $"📊 **Gmail Connection Status**\n\n" +
             $"📧 Email: {credentials.EmailAddress}\n" +
             $"🔗 Status: {status}\n" +
@@ -164,7 +181,7 @@ public class TelegramBotService
     {
         if (!_databaseService.HasUserCredentials(_chatId))
         {
-            await _botClient.SendTextMessageAsync(_chatId,
+            await _botClient.SendMessage(_chatId,
                 "❌ No Gmail account is currently connected.\n\n" +
                 "Use /start to connect your Gmail account.",
                 cancellationToken: cancellationToken);
@@ -181,7 +198,7 @@ public class TelegramBotService
             }
         });
 
-        await _botClient.SendTextMessageAsync(_chatId,
+        await _botClient.SendMessage(_chatId,
             $"⚠️ **Confirm Disconnection**\n\n" +
             $"Are you sure you want to disconnect your Gmail account?\n\n" +
             $"📧 Account: {credentials?.EmailAddress ?? "Unknown"}\n\n" +
@@ -237,7 +254,7 @@ public class TelegramBotService
             **Need help?** Check the documentation or report issues on GitHub.
             """;
 
-        await _botClient.SendTextMessageAsync(_chatId,
+        await _botClient.SendMessage(_chatId,
             helpText,
             parseMode: ParseMode.Markdown,
             cancellationToken: cancellationToken);
@@ -248,7 +265,7 @@ public class TelegramBotService
         // Check if user is authenticated
         if (!_databaseService.HasUserCredentials(_chatId))
         {
-            await _botClient.SendTextMessageAsync(_chatId,
+            await _botClient.SendMessage(_chatId,
                 "❌ No Gmail account connected.\n\n" +
                 "Use /start to connect your Gmail account first.",
                 cancellationToken: cancellationToken);
@@ -268,7 +285,7 @@ public class TelegramBotService
 
         try
         {
-            await _botClient.SendTextMessageAsync(_chatId,
+            await _botClient.SendMessage(_chatId,
                 $"🔍 Fetching your last {count} email(s)...",
                 cancellationToken: cancellationToken);
 
@@ -277,7 +294,7 @@ public class TelegramBotService
 
             if (emails == null || !emails.Any())
             {
-                await _botClient.SendTextMessageAsync(_chatId,
+                await _botClient.SendMessage(_chatId,
                     "📭 No emails found in your inbox.",
                     cancellationToken: cancellationToken);
                 return;
@@ -290,14 +307,14 @@ public class TelegramBotService
                 await Task.Delay(500, cancellationToken); // Small delay to avoid rate limits
             }
 
-            await _botClient.SendTextMessageAsync(_chatId,
+            await _botClient.SendMessage(_chatId,
                 $"✅ Sent {emails.Count} email(s).",
                 cancellationToken: cancellationToken);
         }
         catch (Exception ex)
         {
             Console.WriteLine($"Error fetching emails: {ex.Message}");
-            await _botClient.SendTextMessageAsync(_chatId,
+            await _botClient.SendMessage(_chatId,
                 $"❌ Error fetching emails: {ex.Message}\n\n" +
                 "Please check your Gmail connection with /status",
                 cancellationToken: cancellationToken);
@@ -311,7 +328,7 @@ public class TelegramBotService
             var parts = messageText.Split(' ');
             if (parts.Length < 2)
             {
-                await _botClient.SendTextMessageAsync(_chatId,
+                await _botClient.SendMessage(_chatId,
                     "❓ Usage: `/test_sync <message_id>`\n\n" +
                     "Example: `/test_sync 199b981d77b0cc02`\n\n" +
                     "This will test if a specific Gmail message still exists.",
@@ -321,8 +338,8 @@ public class TelegramBotService
             }
 
             var messageId = parts[1].Trim();
-            
-            await _botClient.SendTextMessageAsync(_chatId,
+
+            await _botClient.SendMessage(_chatId,
                 $"🔍 Testing sync for message ID: `{messageId}`\n\n" +
                 "Checking if message is still in INBOX...",
                 parseMode: ParseMode.Markdown,
@@ -330,10 +347,10 @@ public class TelegramBotService
 
             // Check if message is still in INBOX
             var stillInInbox = await _gmailService.MessageStillInInboxAsync(messageId);
-            
+
             // Check if message exists in database
             var existsInDb = _databaseService.MessageExists(messageId);
-            
+
             var result = $"📊 **Sync Test Results for {messageId}**\n\n" +
                         $"📧 Still in INBOX: {(stillInInbox ? "✅ Yes" : "❌ No")}\n" +
                         $"🗄️ Exists in Database: {(existsInDb ? "✅ Yes" : "❌ No")}\n\n";
@@ -361,7 +378,7 @@ public class TelegramBotService
                          "Message exists in both INBOX and database.";
             }
 
-            await _botClient.SendTextMessageAsync(_chatId,
+            await _botClient.SendMessage(_chatId,
                 result,
                 parseMode: ParseMode.Markdown,
                 cancellationToken: cancellationToken);
@@ -369,7 +386,7 @@ public class TelegramBotService
         catch (Exception ex)
         {
             Console.WriteLine($"Error in test sync: {ex.Message}");
-            await _botClient.SendTextMessageAsync(_chatId,
+            await _botClient.SendMessage(_chatId,
                 $"❌ Error testing sync: {ex.Message}",
                 cancellationToken: cancellationToken);
         }
@@ -379,7 +396,7 @@ public class TelegramBotService
     {
         try
         {
-            await _botClient.SendTextMessageAsync(_chatId,
+            await _botClient.SendMessage(_chatId,
                 "🧹 Starting database cleanup...\n\n" +
                 "Checking all stored messages against Gmail INBOX...",
                 cancellationToken: cancellationToken);
@@ -389,7 +406,7 @@ public class TelegramBotService
             var cleanedCount = 0;
             var totalMessages = allStoredMessages.Count;
 
-            await _botClient.SendTextMessageAsync(_chatId,
+            await _botClient.SendMessage(_chatId,
                 $"📊 Found {totalMessages} messages in database. Starting cleanup...",
                 cancellationToken: cancellationToken);
 
@@ -399,7 +416,7 @@ public class TelegramBotService
                 {
                     // Check if message still exists in Gmail INBOX
                     var stillInInbox = await _gmailService.MessageStillInInboxAsync(storedMessage.MessageId);
-                    
+
                     if (!stillInInbox)
                     {
                         // Message no longer in INBOX, clean it up
@@ -410,7 +427,7 @@ public class TelegramBotService
                             Console.WriteLine($"[CLEANUP] Removed orphaned message '{storedMessage.Subject}' from database");
                         }
                     }
-                    
+
                     // Small delay to avoid hitting Gmail API rate limits
                     await Task.Delay(100, cancellationToken);
                 }
@@ -420,7 +437,7 @@ public class TelegramBotService
                 }
             }
 
-            await _botClient.SendTextMessageAsync(_chatId,
+            await _botClient.SendMessage(_chatId,
                 $"✅ **Cleanup Complete!**\n\n" +
                 $"📊 Total messages checked: {totalMessages}\n" +
                 $"🧹 Orphaned messages removed: {cleanedCount}\n" +
@@ -432,15 +449,21 @@ public class TelegramBotService
         catch (Exception ex)
         {
             Console.WriteLine($"Error in cleanup sync: {ex.Message}");
-            await _botClient.SendTextMessageAsync(_chatId,
+            await _botClient.SendMessage(_chatId,
                 $"❌ Error during cleanup: {ex.Message}",
                 cancellationToken: cancellationToken);
         }
     }
 
+    /// <summary>
+    /// Handles the successful OAuth connection for a user.
+    /// </summary>
+    /// <param name="chatId">The chat ID of the user.</param>
+    /// <param name="emailAddress">The email address of the connected Gmail account.</param>
+    /// <param name="cancellationToken">The cancellation token to stop the operation.</param>
     public async Task HandleOAuthSuccess(long chatId, string emailAddress, CancellationToken cancellationToken)
     {
-        await _botClient.SendTextMessageAsync(chatId,
+        await _botClient.SendMessage(chatId,
             $"✅ **Gmail Connected Successfully!**\n\n" +
             $"📧 Account: {emailAddress}\n" +
             $"🕒 Connected: {DateTime.UtcNow:yyyy-MM-dd HH:mm} UTC\n\n" +
@@ -460,8 +483,8 @@ public class TelegramBotService
         {
             var credentials = _databaseService.GetUserCredentials(callbackQuery.From.Id);
             _databaseService.DeleteUserCredentials(callbackQuery.From.Id);
-            
-            await _botClient.EditMessageTextAsync(
+
+            await _botClient.EditMessageText(
                 callbackQuery.Message.Chat.Id,
                 callbackQuery.Message.MessageId,
                 $"✅ **Gmail Account Disconnected**\n\n" +
@@ -472,14 +495,14 @@ public class TelegramBotService
                 $"💡 Use /start to reconnect anytime",
                 parseMode: ParseMode.Markdown,
                 cancellationToken: cancellationToken);
-                
-            await _botClient.AnswerCallbackQueryAsync(callbackQuery.Id, "Disconnected successfully", cancellationToken: cancellationToken);
+
+            await _botClient.AnswerCallbackQuery(callbackQuery.Id, "Disconnected successfully", cancellationToken: cancellationToken);
             return;
         }
 
         if (callbackQuery.Data == "disconnect_cancel")
         {
-            await _botClient.EditMessageTextAsync(
+            await _botClient.EditMessageText(
                 callbackQuery.Message.Chat.Id,
                 callbackQuery.Message.MessageId,
                 "❌ **Disconnection Cancelled**\n\n" +
@@ -487,20 +510,20 @@ public class TelegramBotService
                 "💡 Use /status to check connection details",
                 parseMode: ParseMode.Markdown,
                 cancellationToken: cancellationToken);
-                
-            await _botClient.AnswerCallbackQueryAsync(callbackQuery.Id, "Cancelled", cancellationToken: cancellationToken);
+
+            await _botClient.AnswerCallbackQuery(callbackQuery.Id, "Cancelled", cancellationToken: cancellationToken);
             return;
         }
 
         // Handle email actions
-        var parts = callbackQuery.Data.Split('|'); 
+        var parts = callbackQuery.Data.Split('|');
         if (parts.Length < 2) return;
-        
-        var action = parts[0]; 
-        var messageId = parts[1]; 
-        var userId = callbackQuery.From.Id.ToString(); 
+
+        var action = parts[0];
+        var messageId = parts[1];
+        var userId = callbackQuery.From.Id.ToString();
         bool success = false;
-        
+
         try
         {
             switch (action)
@@ -510,8 +533,8 @@ public class TelegramBotService
                     if (success)
                     {
                         _databaseService.InsertAction(new MessageAction { MessageId = messageId, ActionType = "delete", ActionTimestamp = DateTime.UtcNow, UserId = userId });
-                        await _botClient.AnswerCallbackQueryAsync(callbackQuery.Id, "Email deleted successfully", cancellationToken: cancellationToken);
-                        await _botClient.DeleteMessageAsync(callbackQuery.Message.Chat.Id, callbackQuery.Message.MessageId, cancellationToken: cancellationToken);
+                        await _botClient.AnswerCallbackQuery(callbackQuery.Id, "Email deleted successfully", cancellationToken: cancellationToken);
+                        await _botClient.DeleteMessage(callbackQuery.Message.Chat.Id, callbackQuery.Message.MessageId, cancellationToken: cancellationToken);
                     }
                     break;
                 case "archive":
@@ -519,7 +542,7 @@ public class TelegramBotService
                     if (success)
                     {
                         _databaseService.InsertAction(new MessageAction { MessageId = messageId, ActionType = "archive", ActionTimestamp = DateTime.UtcNow, UserId = userId });
-                        await _botClient.AnswerCallbackQueryAsync(callbackQuery.Id, "Email archived successfully", cancellationToken: cancellationToken);
+                        await _botClient.AnswerCallbackQuery(callbackQuery.Id, "Email archived successfully", cancellationToken: cancellationToken);
                     }
                     break;
                 case "star":
@@ -527,11 +550,11 @@ public class TelegramBotService
                     if (success)
                     {
                         _databaseService.InsertAction(new MessageAction { MessageId = messageId, ActionType = "star", ActionTimestamp = DateTime.UtcNow, UserId = userId });
-                        await _botClient.AnswerCallbackQueryAsync(callbackQuery.Id, "Email starred successfully", cancellationToken: cancellationToken);
+                        await _botClient.AnswerCallbackQuery(callbackQuery.Id, "Email starred successfully", cancellationToken: cancellationToken);
                     }
                     break;
                 case "forward":
-                    await _botClient.AnswerCallbackQueryAsync(callbackQuery.Id, "Forward feature coming soon", cancellationToken: cancellationToken);
+                    await _botClient.AnswerCallbackQuery(callbackQuery.Id, "Forward feature coming soon", cancellationToken: cancellationToken);
                     break;
                 case "label":
                     if (parts.Length >= 3)
@@ -541,35 +564,41 @@ public class TelegramBotService
                         if (success)
                         {
                             _databaseService.InsertAction(new MessageAction { MessageId = messageId, ActionType = "label_change", ActionTimestamp = DateTime.UtcNow, UserId = userId, NewLabelValues = new List<string> { labelName } });
-                            await _botClient.AnswerCallbackQueryAsync(callbackQuery.Id, $"Label {labelName} added successfully", cancellationToken: cancellationToken);
+                            await _botClient.AnswerCallbackQuery(callbackQuery.Id, $"Label {labelName} added successfully", cancellationToken: cancellationToken);
                         }
                     }
                     break;
             }
-            if (!success && action != "forward") 
-                await _botClient.AnswerCallbackQueryAsync(callbackQuery.Id, "Action failed. Please try again.", cancellationToken: cancellationToken);
+            if (!success && action != "forward")
+                await _botClient.AnswerCallbackQuery(callbackQuery.Id, "Action failed. Please try again.", cancellationToken: cancellationToken);
         }
         catch (Exception ex)
         {
             Console.WriteLine($"Error handling callback: {ex.Message}");
-            await _botClient.AnswerCallbackQueryAsync(callbackQuery.Id, "An error occurred. Please try again later.", cancellationToken: cancellationToken);
+            await _botClient.AnswerCallbackQuery(callbackQuery.Id, "An error occurred. Please try again later.", cancellationToken: cancellationToken);
         }
     }
-
+    
+    /// <summary>
+    /// Sends an email to the specified chat.
+    /// </summary>
+    /// <param name="emailMessage">The email message to send.</param>
+    /// <param name="chatId">The chat ID to send the email to.</param>
+    /// <param name="cancellationToken">The cancellation token to stop the operation.</param>
     public async Task SendEmailAsync(EmailMessage emailMessage, long chatId, CancellationToken cancellationToken)
     {
         try
         {
             var messageText = BuildMessageText(emailMessage);
             var keyboard = BuildInlineKeyboard(emailMessage);
-            var sentMessage = await _botClient.SendTextMessageAsync(chatId, messageText, parseMode: ParseMode.Html, replyMarkup: keyboard, cancellationToken: cancellationToken);
+            var sentMessage = await _botClient.SendMessage(chatId, messageText, parseMode: ParseMode.Html, replyMarkup: keyboard, cancellationToken: cancellationToken);
             emailMessage.TelegramMessageId = sentMessage.MessageId.ToString();
             _databaseService.InsertOrUpdateMessage(emailMessage);
         }
         catch (Exception ex)
         {
             Console.WriteLine($"Error sending email to Telegram: {ex.Message}");
-            
+
             // If message is too long, send a short version with link to Gmail
             if (ex.Message.Contains("too long") || ex.Message.Contains("message is too long"))
             {
@@ -577,7 +606,7 @@ public class TelegramBotService
                 {
                     var shortMessage = BuildShortMessageText(emailMessage);
                     var keyboard = BuildInlineKeyboard(emailMessage);
-                    var sentMessage = await _botClient.SendTextMessageAsync(chatId, shortMessage, parseMode: ParseMode.Html, replyMarkup: keyboard, cancellationToken: cancellationToken);
+                    var sentMessage = await _botClient.SendMessage(chatId, shortMessage, parseMode: ParseMode.Html, replyMarkup: keyboard, cancellationToken: cancellationToken);
                     emailMessage.TelegramMessageId = sentMessage.MessageId.ToString();
                     _databaseService.InsertOrUpdateMessage(emailMessage);
                 }
@@ -599,14 +628,14 @@ public class TelegramBotService
         try
         {
             var minimalText = $"📧 New email from {EscapeHtml(emailMessage.Sender)}\n\n<a href=\"{emailMessage.DirectLink}\">Open in Gmail</a>";
-            await _botClient.SendTextMessageAsync(chatId, minimalText, parseMode: ParseMode.Html, cancellationToken: cancellationToken);
+            await _botClient.SendMessage(chatId, minimalText, parseMode: ParseMode.Html, cancellationToken: cancellationToken);
         }
         catch
         {
             // Last resort: plain text only
             try
             {
-                await _botClient.SendTextMessageAsync(chatId, $"📧 New email - check Gmail", cancellationToken: cancellationToken);
+                await _botClient.SendMessage(chatId, $"📧 New email - check Gmail", cancellationToken: cancellationToken);
             }
             catch { }
         }
@@ -620,17 +649,17 @@ public class TelegramBotService
         text.AppendLine($"<b>Date:</b> {emailMessage.ReceivedDateTime:yyyy-MM-dd HH:mm:ss} UTC");
         if (emailMessage.Labels.Any()) text.AppendLine($"<b>Labels:</b> {string.Join(" ", emailMessage.Labels.Select(l => $"#{EscapeHtml(l.Replace(" ", "_"))}"))}");
         text.AppendLine();
-        
+
         // Content - strip HTML and truncate if needed
         var content = StripHtmlTags(emailMessage.Content);
         if (content.Length > 2500) content = content[..2500] + "...";
         text.AppendLine(EscapeHtml(content));
-        
+
         if (emailMessage.Attachments.Any())
         {
             text.AppendLine();
             text.AppendLine("<b>📎 Attachments:</b>");
-            foreach (var attachment in emailMessage.Attachments) 
+            foreach (var attachment in emailMessage.Attachments)
                 text.AppendLine($"• {EscapeHtml(attachment.Filename)} ({FormatFileSize(attachment.Size)})");
         }
         text.AppendLine();
@@ -655,21 +684,21 @@ public class TelegramBotService
     private string StripHtmlTags(string html)
     {
         if (string.IsNullOrEmpty(html)) return string.Empty;
-        
+
         // Remove script and style tags with their content
-        html = System.Text.RegularExpressions.Regex.Replace(html, "<(script|style|head)[^>]*>.*?</\\1>", "", 
+        html = System.Text.RegularExpressions.Regex.Replace(html, "<(script|style|head)[^>]*>.*?</\\1>", "",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline);
-        
+
         // Remove all HTML tags
         html = System.Text.RegularExpressions.Regex.Replace(html, "<[^>]+>", " ");
-        
+
         // Decode HTML entities
         html = System.Net.WebUtility.HtmlDecode(html);
-        
+
         // Clean up whitespace
         html = System.Text.RegularExpressions.Regex.Replace(html, @"\s+", " ");
         html = html.Trim();
-        
+
         return html;
     }
 
@@ -690,22 +719,42 @@ public class TelegramBotService
     private string EscapeHtml(string text) => string.IsNullOrEmpty(text) ? string.Empty : text.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;");
     private string FormatFileSize(long bytes)
     {
-        string[] sizes = { "B", "KB", "MB", "GB" }; double len = bytes; int order = 0; while (len >= 1024 && order < sizes.Length - 1) { order++; len /= 1024; } return $"{len:0.##} {sizes[order]}";
+        string[] sizes = { "B", "KB", "MB", "GB" }; double len = bytes; int order = 0; while (len >= 1024 && order < sizes.Length - 1) { order++; len /= 1024; }
+        return $"{len:0.##} {sizes[order]}";
     }
     private Task HandleErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken) { Console.WriteLine($"Telegram Bot Error: {exception.Message}"); return Task.CompletedTask; }
+    /// <summary>
+    /// Sends an error notification to the user via Telegram.
+    /// </summary>
+    /// <param name="errorMessage"></param>
+    /// <param name="cancellationToken"></param>
+    /// <returns></returns>
     public async Task NotifyErrorAsync(string errorMessage, CancellationToken cancellationToken)
-    { if (_chatId != 0) { try { await _botClient.SendTextMessageAsync(_chatId, $"⚠️ Error: {errorMessage}", cancellationToken: cancellationToken); } catch { } } }
+    { if (_chatId != 0) { try { await _botClient.SendMessage(_chatId, $"⚠️ Error: {errorMessage}", cancellationToken: cancellationToken); } catch { } } }
 
+    /// <summary>
+    /// Sends a notification to the user via Telegram.
+    /// </summary>
+    /// <param name="message">The message to send.</param>
+    /// <param name="cancellationToken">The cancellation token to stop the operation.</param>
+    /// <returns></returns>
     public async Task NotifyAsync(string message, CancellationToken cancellationToken)
-    { if (_chatId != 0) { try { await _botClient.SendTextMessageAsync(_chatId, message, cancellationToken: cancellationToken); } catch { } } }
+    { if (_chatId != 0) { try { await _botClient.SendMessage(_chatId, message, cancellationToken: cancellationToken); } catch { } } }
 
+    /// <summary>
+    /// Deletes a Telegram message.
+    /// </summary>
+    /// <param name="chatId">The chat ID of the message.</param>
+    /// <param name="telegramMessageId">The Telegram message ID.</param>
+    /// <param name="cancellationToken">The cancellation token to stop the operation.</param>
+    /// <returns>True if deletion was successful, false otherwise.</returns>
     public async Task<bool> DeleteTelegramMessageAsync(long chatId, string telegramMessageId, CancellationToken cancellationToken)
     {
         try
         {
             if (int.TryParse(telegramMessageId, out int messageId))
             {
-                await _botClient.DeleteMessageAsync(chatId, messageId, cancellationToken);
+                await _botClient.DeleteMessage(chatId, messageId, cancellationToken);
                 Console.WriteLine($"Deleted Telegram message {telegramMessageId} from chat {chatId}");
                 return true;
             }
@@ -718,5 +767,15 @@ public class TelegramBotService
         }
     }
 
+    /// <summary>
+    /// Gets the chat ID.
+    /// </summary>
+    /// <returns>The chat ID.</returns>
+    public long GetChatId() => _chatId;
+    
+    /// <summary>
+    /// Sets the chat ID.
+    /// </summary>
+    /// <param name="chatId">The chat ID to set.</param>
     public void SetChatId(long chatId) => _chatId = chatId;
 }
