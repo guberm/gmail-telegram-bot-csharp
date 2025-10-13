@@ -528,8 +528,62 @@ public class TelegramBotService
 
         try
         {
+            // Handle show actions menu
+            if (action == "show_actions")
+            {
+                var emailMessage = _databaseService.GetMessage(messageId);
+                if (emailMessage != null)
+                {
+                    var actionsKeyboard = BuildActionsKeyboard(emailMessage);
+                    await _botClient.EditMessageReplyMarkup(
+                        callbackQuery.Message.Chat.Id,
+                        callbackQuery.Message.MessageId,
+                        replyMarkup: actionsKeyboard,
+                        cancellationToken: cancellationToken);
+                    await _botClient.AnswerCallbackQuery(callbackQuery.Id, "Select an action:", cancellationToken: cancellationToken);
+                }
+                return;
+            }
+
+            // Handle back to main menu
+            if (action == "back")
+            {
+                var emailMessage = _databaseService.GetMessage(messageId);
+                if (emailMessage != null)
+                {
+                    var mainKeyboard = BuildInlineKeyboard(emailMessage);
+                    await _botClient.EditMessageReplyMarkup(
+                        callbackQuery.Message.Chat.Id,
+                        callbackQuery.Message.MessageId,
+                        replyMarkup: mainKeyboard,
+                        cancellationToken: cancellationToken);
+                    await _botClient.AnswerCallbackQuery(callbackQuery.Id, cancellationToken: cancellationToken);
+                }
+                return;
+            }
+
             switch (action)
             {
+                case "mark_read":
+                    success = await _gmailService.MarkAsReadAsync(messageId);
+                    if (success)
+                    {
+                        _databaseService.InsertAction(new MessageAction { MessageId = messageId, ActionType = "mark_read", ActionTimestamp = DateTime.UtcNow, UserId = userId });
+                        await _botClient.AnswerCallbackQuery(callbackQuery.Id, "Email marked as read", cancellationToken: cancellationToken);
+                        
+                        // Return to main menu after action
+                        var emailMessage = _databaseService.GetMessage(messageId);
+                        if (emailMessage != null)
+                        {
+                            var mainKeyboard = BuildInlineKeyboard(emailMessage);
+                            await _botClient.EditMessageReplyMarkup(
+                                callbackQuery.Message.Chat.Id,
+                                callbackQuery.Message.MessageId,
+                                replyMarkup: mainKeyboard,
+                                cancellationToken: cancellationToken);
+                        }
+                    }
+                    break;
                 case "delete":
                     success = await _gmailService.DeleteMessageAsync(messageId);
                     if (success)
@@ -545,6 +599,18 @@ public class TelegramBotService
                     {
                         _databaseService.InsertAction(new MessageAction { MessageId = messageId, ActionType = "archive", ActionTimestamp = DateTime.UtcNow, UserId = userId });
                         await _botClient.AnswerCallbackQuery(callbackQuery.Id, "Email archived successfully", cancellationToken: cancellationToken);
+                        
+                        // Return to main menu after action
+                        var emailMessage = _databaseService.GetMessage(messageId);
+                        if (emailMessage != null)
+                        {
+                            var mainKeyboard = BuildInlineKeyboard(emailMessage);
+                            await _botClient.EditMessageReplyMarkup(
+                                callbackQuery.Message.Chat.Id,
+                                callbackQuery.Message.MessageId,
+                                replyMarkup: mainKeyboard,
+                                cancellationToken: cancellationToken);
+                        }
                     }
                     break;
                 case "star":
@@ -553,6 +619,18 @@ public class TelegramBotService
                     {
                         _databaseService.InsertAction(new MessageAction { MessageId = messageId, ActionType = "star", ActionTimestamp = DateTime.UtcNow, UserId = userId });
                         await _botClient.AnswerCallbackQuery(callbackQuery.Id, "Email starred successfully", cancellationToken: cancellationToken);
+                        
+                        // Return to main menu after action
+                        var emailMessage = _databaseService.GetMessage(messageId);
+                        if (emailMessage != null)
+                        {
+                            var mainKeyboard = BuildInlineKeyboard(emailMessage);
+                            await _botClient.EditMessageReplyMarkup(
+                                callbackQuery.Message.Chat.Id,
+                                callbackQuery.Message.MessageId,
+                                replyMarkup: mainKeyboard,
+                                cancellationToken: cancellationToken);
+                        }
                     }
                     break;
                 case "forward":
@@ -861,11 +939,28 @@ public class TelegramBotService
         var buttons = new List<List<InlineKeyboardButton>>
         {
             new() {
-                InlineKeyboardButton.WithCallbackData("🗑️ Delete", $"delete|{emailMessage.MessageId}"),
-                InlineKeyboardButton.WithCallbackData("📦 Archive", $"archive|{emailMessage.MessageId}"),
+                InlineKeyboardButton.WithCallbackData("⚡ Actions", $"show_actions|{emailMessage.MessageId}"),
                 InlineKeyboardButton.WithCallbackData("⭐ Star", $"star|{emailMessage.MessageId}")
+            }
+        };
+        return new InlineKeyboardMarkup(buttons);
+    }
+
+    private InlineKeyboardMarkup BuildActionsKeyboard(EmailMessage emailMessage)
+    {
+        var buttons = new List<List<InlineKeyboardButton>>
+        {
+            new() {
+                InlineKeyboardButton.WithCallbackData("🗑️ Delete", $"delete|{emailMessage.MessageId}"),
+                InlineKeyboardButton.WithCallbackData("📦 Archive", $"archive|{emailMessage.MessageId}")
             },
-            new() { InlineKeyboardButton.WithCallbackData("➡️ Forward", $"forward|{emailMessage.MessageId}") }
+            new() {
+                InlineKeyboardButton.WithCallbackData("➡️ Forward", $"forward|{emailMessage.MessageId}"),
+                InlineKeyboardButton.WithCallbackData("✅ Mark as Read", $"mark_read|{emailMessage.MessageId}")
+            },
+            new() {
+                InlineKeyboardButton.WithCallbackData("⬅️ Back", $"back|{emailMessage.MessageId}")
+            }
         };
         return new InlineKeyboardMarkup(buttons);
     }
